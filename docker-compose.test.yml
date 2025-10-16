@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # Test PostgreSQL Database
+  postgres-test:
+    image: timescale/timescaledb:latest-pg15
+    container_name: matlab-automation-postgres-test
+    environment:
+      POSTGRES_DB: matlab_automation_test
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_test_data:/var/lib/postgresql/data
+    networks:
+      - test-network
+
+  # Test Redis
+  redis-test:
+    image: redis:7-alpine
+    container_name: matlab-automation-redis-test
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_test_data:/data
+    networks:
+      - test-network
+
+  # Test Backend
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: matlab-automation-backend-test
+    environment:
+      - DATABASE_URL=postgresql://test_user:test_password@postgres-test:5432/matlab_automation_test
+      - REDIS_URL=redis://redis-test:6379
+      - DEBUG=true
+      - LOG_LEVEL=DEBUG
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres-test
+      - redis-test
+    networks:
+      - test-network
+    command: ["python", "-m", "pytest", "tests/", "-v"]
+
+volumes:
+  postgres_test_data:
+  redis_test_data:
+
+networks:
+  test-network:
+    driver: bridge

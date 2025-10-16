@@ -1,0 +1,174 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    container_name: matlab-automation-postgres
+    environment:
+      POSTGRES_DB: matlab_automation
+      POSTGRES_USER: matlab_user
+      POSTGRES_PASSWORD: matlab_password
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - matlab-network
+
+  # Redis for caching and job queuing
+  redis:
+    image: redis:7-alpine
+    container_name: matlab-automation-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - matlab-network
+
+  # InfluxDB for time-series analytics
+  influxdb:
+    image: influxdb:2.7
+    container_name: matlab-automation-influxdb
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup
+      DOCKER_INFLUXDB_INIT_USERNAME: admin
+      DOCKER_INFLUXDB_INIT_PASSWORD: adminpassword
+      DOCKER_INFLUXDB_INIT_ORG: matlab-automation
+      DOCKER_INFLUXDB_INIT_BUCKET: test-data
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - matlab-network
+
+  # FastAPI Backend
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: matlab-automation-backend
+    environment:
+      - DATABASE_URL=postgresql://matlab_user:matlab_password@postgres:5432/matlab_automation
+      - REDIS_URL=redis://redis:6379
+      - INFLUXDB_URL=http://influxdb:8086
+      - MATLAB_PATH=/usr/local/MATLAB/R2023b
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./matlab:/app/matlab
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - redis
+      - influxdb
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+  # Celery Worker for background tasks
+  celery-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: matlab-automation-celery-worker
+    command: celery -A app.core.celery worker --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://matlab_user:matlab_password@postgres:5432/matlab_automation
+      - REDIS_URL=redis://redis:6379
+      - MATLAB_PATH=/usr/local/MATLAB/R2023b
+    volumes:
+      - ./matlab:/app/matlab
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+  # Celery Beat for scheduled tasks
+  celery-beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: matlab-automation-celery-beat
+    command: celery -A app.core.celery beat --loglevel=info
+    environment:
+      - DATABASE_URL=postgresql://matlab_user:matlab_password@postgres:5432/matlab_automation
+      - REDIS_URL=redis://redis:6379
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+  # React Frontend (Development mode)
+  frontend:
+    image: node:18-alpine
+    container_name: matlab-automation-frontend
+    working_dir: /app
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: sh -c "npm install --legacy-peer-deps && npm start"
+    depends_on:
+      - backend
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: matlab-automation-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./docker/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./docker/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+  # Grafana for dashboards
+  grafana:
+    image: grafana/grafana:latest
+    container_name: matlab-automation-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+    depends_on:
+      - influxdb
+    networks:
+      - matlab-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  influxdb_data:
+  grafana_data:
+
+networks:
+  matlab-network:
+    driver: bridge

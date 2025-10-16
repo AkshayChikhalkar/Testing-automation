@@ -1,0 +1,181 @@
+# Set default behavior to automatically normalize line endings
+* text=auto
+
+# Force LF line endings for text files
+*.txt text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.xml text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.js text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.jsx text eol=lf
+*.py text eol=lf
+*.sh text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Force CRLF line endings for Windows batch files
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Force LF line endings for shell scripts
+*.sh text eol=lf
+
+# Binary files
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.svg binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+*.zip binary
+*.tar.gz binary
+*.rar binary
+*.7z binary
+*.exe binary
+*.dll binary
+*.so binary
+*.dylib binary
+*.mat binary
+*.fig binary
+*.mex* binary
+
+# MATLAB specific
+*.m text eol=lf
+*.slx binary
+*.mdl binary
+*.slxc binary
+*.slxp binary
+*.sfx binary
+*.sfxp binary
+*.sldd binary
+*.slreqx binary
+*.mldatx binary
+*.rpt binary
+*.fin binary
+*.lti binary
+*.lmi binary
+*.mpc binary
+*.idd binary
+*.fis binary
+*.net binary
+*.onnx binary
+*.urdf binary
+*.osm binary
+*.g2o binary
+*.h5 binary
+*.hdf5 binary
+*.nec binary
+*.spice binary
+*.ibis binary
+*.elf binary
+*.vhd text eol=lf
+*.v text eol=lf
+*.sv text eol=lf
+*.svh text eol=lf
+*.vcd binary
+*.fsdb binary
+*.wlf binary
+*.fix binary
+*.c text eol=lf
+*.h text eol=lf
+*.cpp text eol=lf
+*.hpp text eol=lf
+*.rtw text eol=lf
+*.st text eol=lf
+*.cvt binary
+*.sldv binary
+*.sci binary
+*.slcheck binary
+*.sladvisor binary
+*.slperf binary
+*.slprof binary
+*.sldebug binary
+
+# Database files
+*.db binary
+*.sqlite binary
+*.sqlite3 binary
+
+# Docker files
+Dockerfile text eol=lf
+docker-compose.yml text eol=lf
+docker-compose.yaml text eol=lf
+.dockerignore text eol=lf
+
+# Kubernetes files
+*.yaml text eol=lf
+*.yml text eol=lf
+
+# Terraform files
+*.tf text eol=lf
+*.tfvars text eol=lf
+
+# Ansible files
+*.ansible text eol=lf
+
+# Vagrant files
+Vagrantfile text eol=lf
+
+# Git files
+.gitignore text eol=lf
+.gitattributes text eol=lf
+.gitmodules text eol=lf
+
+# Documentation
+README.md text eol=lf
+CONTRIBUTING.md text eol=lf
+LICENSE text eol=lf
+CHANGELOG.md text eol=lf
+*.md text eol=lf
+
+# Configuration files
+*.ini text eol=lf
+*.cfg text eol=lf
+*.conf text eol=lf
+*.config text eol=lf
+*.toml text eol=lf
+
+# Package files
+package.json text eol=lf
+package-lock.json text eol=lf
+yarn.lock text eol=lf
+requirements.txt text eol=lf
+requirements-core.txt text eol=lf
+Pipfile text eol=lf
+Pipfile.lock text eol=lf
+poetry.lock text eol=lf
+pyproject.toml text eol=lf
+
+# Environment files
+.env text eol=lf
+.env.example text eol=lf
+.env.local text eol=lf
+.env.development text eol=lf
+.env.test text eol=lf
+.env.production text eol=lf
+
+# Log files
+*.log text eol=lf
+
+# Temporary files
+*.tmp text eol=lf
+*.temp text eol=lf
+*.swp text eol=lf
+*.swo text eol=lf
+
+# Backup files
+*.bak text eol=lf
+*.backup text eol=lf
+*.old text eol=lf

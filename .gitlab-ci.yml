@@ -1,0 +1,198 @@
+stages:
+  - test
+  - build
+  - security
+  - deploy
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
+  POSTGRES_DB: matlab_automation_test
+  POSTGRES_USER: test_user
+  POSTGRES_PASSWORD: test_password
+
+# Backend Tests
+backend-test:
+  stage: test
+  image: python:3.11-slim
+  services:
+    - postgres:15
+    - redis:7-alpine
+  before_script:
+    - apt-get update && apt-get install -y gcc g++ libpq-dev
+    - pip install --upgrade pip
+    - cd backend
+    - pip install -r requirements.txt
+    - pip install -r requirements-dev.txt
+  script:
+    - python -m pytest tests/ -v --cov=app --cov-report=xml
+    - python -m flake8 app/
+    - python -m black --check app/
+    - python -m isort --check-only app/
+  coverage: '/TOTAL.*\s+(\d+%)$/'
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: backend/coverage.xml
+    paths:
+      - backend/coverage.xml
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Frontend Tests
+frontend-test:
+  stage: test
+  image: node:18-alpine
+  before_script:
+    - cd frontend
+    - npm ci
+  script:
+    - npm run lint
+    - npm run test:coverage
+    - npm run build
+  artifacts:
+    reports:
+      coverage_report:
+        coverage_format: cobertura
+        path: frontend/coverage/cobertura-coverage.xml
+    paths:
+      - frontend/build/
+    expire_in: 1 hour
+  only:
+    - merge_requests
+    - main
+    - develop
+
+# Security Scanning
+security-scan:
+  stage: security
+  image: python:3.11-slim
+  before_script:
+    - cd backend
+    - pip install safety bandit
+  script:
+    - safety check -r requirements.txt
+    - bandit -r app/ -f json -o security-report.json
+  artifacts:
+    reports:
+      sast: security-report.json
+    expire_in: 1 week
+  allow_failure: true
+  only:
+    - merge_requests
+    - main
+
+# Docker Build
+build-backend:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - cd backend
+    - docker build -t $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA .
+    - docker build -t $CI_REGISTRY_IMAGE/backend:latest .
+    - docker push $CI_REGISTRY_IMAGE/backend:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/backend:latest
+  only:
+    - main
+    - develop
+
+build-frontend:
+  stage: build
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
+  script:
+    - cd frontend
+    - docker build -t $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA .
+    - docker build -t $CI_REGISTRY_IMAGE/frontend:latest .
+    - docker push $CI_REGISTRY_IMAGE/frontend:$CI_COMMIT_SHA
+    - docker push $CI_REGISTRY_IMAGE/frontend:latest
+  only:
+    - main
+    - develop
+
+# Development Deployment
+deploy-dev:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to development environment"
+    - curl -X POST "$DEV_WEBHOOK_URL" -H "Content-Type: application/json" -d '{"ref":"'$CI_COMMIT_SHA'"}'
+  environment:
+    name: development
+    url: https://dev.matlab-automation.example.com
+  only:
+    - develop
+  when: manual
+
+# Production Deployment
+deploy-prod:
+  stage: deploy
+  image: alpine:latest
+  before_script:
+    - apk add --no-cache curl
+  script:
+    - echo "Deploying to production environment"
+    - curl -X POST "$PROD_WEBHOOK_URL" -H "Content-Type: application/json" -d '{"ref":"'$CI_COMMIT_SHA'"}'
+  environment:
+    name: production
+    url: https://matlab-automation.example.com
+  only:
+    - main
+  when: manual
+
+# Database Migration
+migrate-db:
+  stage: deploy
+  image: python:3.11-slim
+  before_script:
+    - cd backend
+    - pip install -r requirements.txt
+  script:
+    - python -m alembic upgrade head
+  only:
+    - main
+    - develop
+  when: manual
+
+# Performance Testing
+performance-test:
+  stage: test
+  image: loadimpact/k6:latest
+  script:
+    - k6 run tests/performance/load-test.js
+  artifacts:
+    reports:
+      performance: tests/performance/performance-report.json
+  only:
+    - main
+  when: manual
+
+# Integration Testing
+integration-test:
+  stage: test
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker-compose -f docker-compose.test.yml up -d
+    - sleep 30  # Wait for services to start
+  script:
+    - cd backend
+    - python -m pytest tests/integration/ -v
+  after_script:
+    - docker-compose -f docker-compose.test.yml down
+  only:
+    - merge_requests
+    - main

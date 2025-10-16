@@ -1,0 +1,121 @@
+# EditorConfig is awesome: https://EditorConfig.org
+
+# top-most EditorConfig file
+root = true
+
+# All files
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+# Python files
+[*.py]
+indent_size = 4
+max_line_length = 88
+
+# JavaScript/TypeScript files
+[*.{js,jsx,ts,tsx}]
+indent_size = 2
+max_line_length = 100
+
+# JSON files
+[*.json]
+indent_size = 2
+
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# MATLAB files
+[*.m]
+indent_size = 4
+max_line_length = 100
+
+# Shell scripts
+[*.sh]
+indent_size = 2
+
+# Batch files
+[*.{bat,cmd}]
+end_of_line = crlf
+indent_size = 2
+
+# PowerShell files
+[*.ps1]
+end_of_line = crlf
+indent_size = 2
+
+# Docker files
+[Dockerfile*]
+indent_size = 2
+
+# Makefile
+[Makefile]
+indent_style = tab
+
+# SQL files
+[*.sql]
+indent_size = 2
+
+# CSS/SCSS files
+[*.{css,scss,sass}]
+indent_size = 2
+
+# HTML files
+[*.html]
+indent_size = 2
+
+# XML files
+[*.xml]
+indent_size = 2
+
+# Configuration files
+[*.{ini,cfg,conf}]
+indent_size = 2
+
+# Package files
+[package.json]
+indent_size = 2
+
+# Requirements files
+[requirements*.txt]
+indent_size = 2
+
+# Environment files
+[.env*]
+indent_size = 2
+
+# Git files
+[.gitignore]
+indent_size = 2
+
+[.gitattributes]
+indent_size = 2
+
+# License files
+[LICENSE*]
+indent_size = 2
+
+# Readme files
+[README*]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# Contributing files
+[CONTRIBUTING*]
+trim_trailing_whitespace = false
+max_line_length = off
+
+# Changelog files
+[CHANGELOG*]
+trim_trailing_whitespace = false
+max_line_length = off
