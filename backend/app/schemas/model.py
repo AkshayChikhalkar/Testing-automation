@@ -11,8 +11,8 @@ class ModelBase(BaseModel):
     """Base model schema"""
     name: str = Field(..., min_length=1, max_length=100)
     description: Optional[str] = None
-    file_path: str = Field(..., min_length=1, max_length=500)
-    file_type: str = Field(..., pattern="^(slx|m)$")
+    file_path: Optional[str] = Field(None, max_length=500)
+    file_type: Optional[str] = Field(None, pattern="^(slx|m)$")
     version: str = Field(default="1.0.0", max_length=20)
     startup_script: Optional[str] = Field(None, max_length=500)
     input_schema: Optional[Dict[str, Any]] = None

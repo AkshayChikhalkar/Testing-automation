@@ -62,6 +62,7 @@ const TestRuns: React.FC = () => {
     model_id: '',
     parameters: {},
   });
+  const [inputFile, setInputFile] = useState<File | null>(null);
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -81,11 +82,27 @@ const TestRuns: React.FC = () => {
 
   // Create test run mutation
   const createTestRunMutation = useMutation({
-    mutationFn: apiService.testRuns.create,
+    mutationFn: async (data: any) => {
+      if (inputFile) {
+        const fd = new FormData();
+        fd.append('name', data.name);
+        fd.append('model_id', String(data.model_id));
+        // user_id is set from the JWT on the backend
+        fd.append('input_file', inputFile);
+        if (data.parameters) {
+          fd.append('configuration', JSON.stringify({ parameters: data.parameters }));
+        }
+        return apiClient.post('/test-runs/create-with-input', fd, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        });
+      }
+      return apiService.testRuns.create(data);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['testRuns'] });
       setOpenDialog(false);
       resetForm();
+      setInputFile(null);
     },
   });
 
@@ -329,6 +346,14 @@ const TestRuns: React.FC = () => {
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             sx={{ mb: 2 }}
           />
+          <Box sx={{ mb: 2 }}>
+            <Typography variant="caption" display="block" gutterBottom>Input data file</Typography>
+            <input
+              type="file"
+              accept=".json,.csv,.mat,.xlsx"
+              onChange={(e) => setInputFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+            />
+          </Box>
           <FormControl fullWidth sx={{ mb: 2 }}>
             <InputLabel>Model</InputLabel>
             <Select

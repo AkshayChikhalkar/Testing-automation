@@ -27,9 +27,9 @@ import {
   Security as SecurityIcon,
   Storage as StorageIcon,
   Notifications as NotificationsIcon,
-  Palette as PaletteIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import apiClient from '../../services/api';
 
 
 interface AppSettings {
@@ -68,7 +68,7 @@ interface AppSettings {
 }
 
 const Settings: React.FC = () => {
-  const [settings, setSettings] = useState<AppSettings>({
+  const defaultSettings: AppSettings = {
     general: {
       appName: 'MATLAB Automation Platform',
       timezone: 'UTC',
@@ -101,7 +101,9 @@ const Settings: React.FC = () => {
       fontSize: 14,
       compactMode: false,
     },
-  });
+  };
+
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
 
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' as 'success' | 'error' });
   const [activeTab, setActiveTab] = useState('general');
@@ -111,17 +113,40 @@ const Settings: React.FC = () => {
   // Fetch settings
   const { data: currentSettings, isLoading } = useQuery({
     queryKey: ['settings'],
-    queryFn: () => {
-      // Mock data for now - replace with actual API call
-      return Promise.resolve(settings);
+    queryFn: async () => {
+      const res = await apiClient.get('/settings');
+      const data = res.data || {};
+      const loaded: AppSettings = {
+        general: { ...defaultSettings.general, ...(data.general || {}) },
+        matlab: { ...defaultSettings.matlab, ...(data.matlab || {}) },
+        storage: { ...defaultSettings.storage, ...(data.storage || {}) },
+        security: { ...defaultSettings.security, ...(data.security || {}) },
+        appearance: { ...defaultSettings.appearance, ...(data.appearance || {}) },
+      };
+      return loaded;
     },
   });
 
+  // Keep local form state in sync with server
+  React.useEffect(() => {
+    if (currentSettings) {
+      setSettings(currentSettings);
+    }
+  }, [currentSettings]);
+
   // Save settings mutation
   const saveSettingsMutation = useMutation({
-    mutationFn: (newSettings: AppSettings) => {
-      // Mock save - replace with actual API call
-      return Promise.resolve(newSettings);
+    mutationFn: async (newSettings: AppSettings) => {
+      const res = await apiClient.put('/settings', newSettings);
+      const data = res.data || {};
+      const saved: AppSettings = {
+        general: { ...defaultSettings.general, ...(data.general || {}) },
+        matlab: { ...defaultSettings.matlab, ...(data.matlab || {}) },
+        storage: { ...defaultSettings.storage, ...(data.storage || {}) },
+        security: { ...defaultSettings.security, ...(data.security || {}) },
+        appearance: { ...defaultSettings.appearance, ...(data.appearance || {}) },
+      };
+      return saved;
     },
     onSuccess: () => {
       setSnackbar({ open: true, message: 'Settings saved successfully!', severity: 'success' });
@@ -157,7 +182,6 @@ const Settings: React.FC = () => {
     { id: 'matlab', label: 'MATLAB', icon: <StorageIcon /> },
     { id: 'storage', label: 'Storage', icon: <StorageIcon /> },
     { id: 'security', label: 'Security', icon: <SecurityIcon /> },
-    { id: 'appearance', label: 'Appearance', icon: <PaletteIcon /> },
   ];
 
   if (isLoading) {
@@ -468,56 +492,7 @@ const Settings: React.FC = () => {
                 </Grid>
               )}
 
-              {activeTab === 'appearance' && (
-                <Grid container spacing={3}>
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Theme</InputLabel>
-                      <Select
-                        value={settings.appearance.theme}
-                        label="Theme"
-                        onChange={(e) => handleSettingChange('appearance', 'theme', e.target.value)}
-                      >
-                        <MenuItem value="light">Light</MenuItem>
-                        <MenuItem value="dark">Dark</MenuItem>
-                        <MenuItem value="auto">Auto (System)</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <TextField
-                      fullWidth
-                      label="Primary Color"
-                      type="color"
-                      value={settings.appearance.primaryColor}
-                      onChange={(e) => handleSettingChange('appearance', 'primaryColor', e.target.value)}
-                    />
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <Typography gutterBottom>Font Size</Typography>
-                    <Slider
-                      value={settings.appearance.fontSize}
-                      onChange={(_, value) => handleSettingChange('appearance', 'fontSize', value)}
-                      min={12}
-                      max={18}
-                      step={1}
-                      marks
-                      valueLabelDisplay="auto"
-                    />
-                  </Grid>
-                  <Grid item xs={12}>
-                    <FormControlLabel
-                      control={
-                        <Switch
-                          checked={settings.appearance.compactMode}
-                          onChange={(e) => handleSettingChange('appearance', 'compactMode', e.target.checked)}
-                        />
-                      }
-                      label="Compact mode"
-                    />
-                  </Grid>
-                </Grid>
-              )}
+              {/* Appearance settings removed until fully supported in UI theme */}
             </CardContent>
           </Card>
         </Grid>

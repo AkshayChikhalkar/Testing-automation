@@ -49,6 +49,16 @@ const Models: React.FC = () => {
     description: '',
     version: '1.0.0',
   });
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advanced, setAdvanced] = useState({
+    category: '',
+    tags: '', // comma-separated or JSON
+    author: '',
+    startup_script: '',
+    parameters: '{}', // JSON
+  });
+  const [startupFile, setStartupFile] = useState<File | null>(null);
 
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -88,6 +98,10 @@ const Models: React.FC = () => {
   const resetForm = () => {
     setFormData({ name: '', description: '', version: '1.0.0' });
     setEditingModel(null);
+    setSelectedFile(null);
+    setAdvancedOpen(false);
+    setAdvanced({ category: '', tags: '', author: '', startup_script: '', parameters: '{}' });
+    setStartupFile(null);
   };
 
   const handleOpenDialog = (model?: Model) => {
@@ -107,9 +121,39 @@ const Models: React.FC = () => {
   const handleSubmit = () => {
     if (editingModel) {
       updateModelMutation.mutate({ id: editingModel.id, data: formData });
-    } else {
-      createModelMutation.mutate(formData);
+      return;
     }
+
+    // If a file is chosen, use upload endpoint
+    if (selectedFile) {
+      const fd = new FormData();
+      fd.append('file', selectedFile);
+      fd.append('name', formData.name);
+      if (formData.description) fd.append('description', formData.description);
+      if (formData.version) fd.append('version', formData.version);
+      if (advanced.category) fd.append('category', advanced.category);
+      if (advanced.author) fd.append('author', advanced.author);
+      if (startupFile) {
+        fd.append('startup_script_file', startupFile);
+      } else if (advanced.startup_script) {
+        fd.append('startup_script', advanced.startup_script);
+      }
+      if (advanced.tags) fd.append('tags', advanced.tags);
+      if (advanced.parameters) fd.append('parameters', advanced.parameters);
+      // category optional; skip for now
+
+      apiService.models.upload(fd)
+        .then(() => {
+          queryClient.invalidateQueries({ queryKey: ['models'] });
+          setOpenDialog(false);
+          resetForm();
+        })
+        .catch(() => { /* silently fail, UI could add snackbar later */ });
+      return;
+    }
+
+    // No file: create metadata-only model
+    createModelMutation.mutate(formData);
   };
 
   const handleDelete = (id: number) => {
@@ -261,6 +305,12 @@ const Models: React.FC = () => {
             onChange={(e) => setFormData({ ...formData, name: e.target.value })}
             sx={{ mb: 2 }}
           />
+          <input
+            type="file"
+            accept=".slx,.m"
+            onChange={(e) => setSelectedFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+            style={{ marginBottom: 16 }}
+          />
           <TextField
             margin="dense"
             label="Description"
@@ -280,6 +330,54 @@ const Models: React.FC = () => {
             value={formData.version}
             onChange={(e) => setFormData({ ...formData, version: e.target.value })}
           />
+
+          {/* Advanced Section inside the dialog */}
+          <Box sx={{ mt: 2 }}>
+            <Button size="small" onClick={() => setAdvancedOpen(v => !v)}>
+              {advancedOpen ? 'Hide Advanced' : 'Show Advanced'}
+            </Button>
+            {advancedOpen && (
+              <Box sx={{ mt: 2, display: 'grid', gap: 2 }}>
+                <TextField
+                  label="Category"
+                  fullWidth
+                  value={advanced.category}
+                  onChange={(e) => setAdvanced({ ...advanced, category: e.target.value })}
+                />
+                <TextField
+                  label="Tags (comma-separated or JSON array)"
+                  fullWidth
+                  value={advanced.tags}
+                  onChange={(e) => setAdvanced({ ...advanced, tags: e.target.value })}
+                />
+                <TextField
+                  label="Author"
+                  fullWidth
+                  value={advanced.author}
+                  onChange={(e) => setAdvanced({ ...advanced, author: e.target.value })}
+                />
+                <TextField
+                  label="Startup Script Path"
+                  fullWidth
+                  value={advanced.startup_script}
+                  onChange={(e) => setAdvanced({ ...advanced, startup_script: e.target.value })}
+                />
+              <input
+                type="file"
+                accept=".m"
+                onChange={(e) => setStartupFile(e.target.files && e.target.files[0] ? e.target.files[0] : null)}
+              />
+                <TextField
+                  label="Parameters (JSON)"
+                  fullWidth
+                  multiline
+                  minRows={3}
+                  value={advanced.parameters}
+                  onChange={(e) => setAdvanced({ ...advanced, parameters: e.target.value })}
+                />
+              </Box>
+            )}
+          </Box>
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Cancel</Button>

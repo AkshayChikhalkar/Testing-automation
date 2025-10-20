@@ -59,9 +59,9 @@ export const apiService = {
 
   // Models endpoints
   models: {
-    list: (params?: any) => apiClient.get('/models', { params }),
+    list: (params?: any) => apiClient.get('/models/', { params }),
     get: (id: number) => apiClient.get(`/models/${id}`),
-    create: (data: any) => apiClient.post('/models', data),
+    create: (data: any) => apiClient.post('/models/', data),
     update: (id: number, data: any) => apiClient.put(`/models/${id}`, data),
     delete: (id: number) => apiClient.delete(`/models/${id}`),
     validate: (id: number) => apiClient.post(`/models/${id}/validate`),
@@ -73,9 +73,9 @@ export const apiService = {
 
   // Test runs endpoints
   testRuns: {
-    list: (params?: any) => apiClient.get('/test-runs', { params }),
+    list: (params?: any) => apiClient.get('/test-runs/', { params }),
     get: (id: number) => apiClient.get(`/test-runs/${id}`),
-    create: (data: any) => apiClient.post('/test-runs', data),
+    create: (data: any) => apiClient.post('/test-runs/', data),
     execute: (id: number) => apiClient.post(`/test-runs/${id}/execute`),
     cancel: (id: number) => apiClient.post(`/test-runs/${id}/cancel`),
     getResults: (id: number) => apiClient.get(`/test-runs/${id}/results`),
@@ -140,3 +140,32 @@ export const apiService = {
 };
 
 export default apiClient;
+
+// Attempt silent refresh on 401 using refresh token
+apiClient.interceptors.response.use(
+  (res) => res,
+  async (error) => {
+    const original = error.config;
+    if (error.response?.status === 401 && !original._retry) {
+      original._retry = true;
+      const refresh = localStorage.getItem('refresh_token');
+      if (refresh) {
+        try {
+          const r = await apiClient.post('/auth/refresh', { refresh_token: refresh });
+          const newAccess = r.data?.access_token;
+          if (newAccess) {
+            localStorage.setItem('auth_token', newAccess);
+            original.headers.Authorization = `Bearer ${newAccess}`;
+            return apiClient(original);
+          }
+        } catch (_) {
+          // fallthrough to logout
+        }
+      }
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('refresh_token');
+      window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);

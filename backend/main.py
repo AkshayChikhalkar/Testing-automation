@@ -14,6 +14,11 @@ from app.core.config import settings
 from app.core.database import init_db
 from app.api.v1.api import api_router
 from app.core.exceptions import CustomException
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.core.database import AsyncSessionLocal
+from app.models.user import User
+from app.core.security import get_password_hash
 
 # Configure structured logging
 structlog.configure(
@@ -46,6 +51,45 @@ async def lifespan(app: FastAPI):
     # Initialize database
     await init_db()
     logger.info("Database initialized successfully")
+
+    # Seed default admin user if none exists
+    try:
+        async with AsyncSessionLocal() as session:  # type: AsyncSession
+            # Ensure default admin exists
+            result = await session.execute(select(User).where(User.username == "admin"))
+            admin = result.scalar_one_or_none()
+            if admin is None:
+                admin = User(
+                    username="admin",
+                    email="admin@example.com",
+                    full_name="Administrator",
+                    hashed_password=get_password_hash("admin123"),
+                    is_active=True,
+                    is_superuser=True,
+                    role="admin",
+                )
+                session.add(admin)
+                await session.commit()
+                logger.info("Seeded default admin user", username="admin")
+
+            # Ensure requested dev user 'akshay' exists
+            result = await session.execute(select(User).where(User.username == "akshay"))
+            akshay = result.scalar_one_or_none()
+            if akshay is None:
+                akshay = User(
+                    username="akshay",
+                    email="akshay@example.com",
+                    full_name="Akshay",
+                    hashed_password=get_password_hash("akshay"),
+                    is_active=True,
+                    is_superuser=False,
+                    role="user",
+                )
+                session.add(akshay)
+                await session.commit()
+                logger.info("Seeded dev user", username="akshay")
+    except Exception as e:
+        logger.error("Failed to seed default admin user", error=str(e))
     
     # Initialize MATLAB engine if available
     try:

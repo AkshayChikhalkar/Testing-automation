@@ -17,8 +17,8 @@ class Model(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False, index=True)
     description = Column(Text)
-    file_path = Column(String(500), nullable=False)
-    file_type = Column(String(10), nullable=False)  # .slx, .m
+    file_path = Column(String(500), nullable=True)
+    file_type = Column(String(10), nullable=True)  # .slx, .m
     version = Column(String(20), default="1.0.0")
     
     # Model configuration

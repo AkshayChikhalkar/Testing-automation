@@ -14,6 +14,9 @@ import {
   Typography,
   useTheme,
   useMediaQuery,
+  Button,
+  Menu,
+  MenuItem,
 } from '@mui/material';
 import {
   Menu as MenuIcon,
@@ -24,6 +27,8 @@ import {
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import { useNavigate, useLocation } from 'react-router-dom';
+import apiClient from '../../services/api';
+import { AccountCircle, Logout, Lock } from '@mui/icons-material';
 
 const drawerWidth = 240;
 
@@ -37,6 +42,49 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
   const location = useLocation();
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
+  const [currentUser, setCurrentUser] = React.useState<{ username: string; email?: string } | null>(null);
+  const [anchorEl, setAnchorEl] = React.useState<null | HTMLElement>(null);
+  const open = Boolean(anchorEl);
+
+  React.useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    const publicPaths = ['/login', '/signup'];
+    if (!token && !publicPaths.includes(location.pathname)) {
+      navigate('/login');
+    }
+  }, [location.pathname, navigate]);
+
+  React.useEffect(() => {
+    const token = localStorage.getItem('auth_token');
+    if (!token) {
+      setCurrentUser(null);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await apiClient.get('/auth/me');
+        setCurrentUser({ username: res.data.username, email: res.data.email });
+      } catch {
+        // token invalid -> force logout
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('refresh_token');
+        setCurrentUser(null);
+        navigate('/login');
+      }
+    })();
+  }, [location.pathname, navigate]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('auth_token');
+    localStorage.removeItem('refresh_token');
+    setCurrentUser(null);
+    navigate('/login');
+  };
+
+  const handleMenu = (event: React.MouseEvent<HTMLButtonElement>) => {
+    setAnchorEl(event.currentTarget);
+  };
+  const handleMenuClose = () => setAnchorEl(null);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -98,9 +146,46 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
           >
             <MenuIcon />
           </IconButton>
-          <Typography variant="h6" noWrap component="div">
+          <Typography variant="h6" noWrap component="div" sx={{ flexGrow: 1 }}>
             MATLAB Automation Platform
           </Typography>
+          {currentUser && (
+            <Box display="flex" alignItems="center" gap={2}>
+              <Button
+                color="inherit"
+                startIcon={<AccountCircle />}
+                onClick={handleMenu}
+              >
+                {currentUser.username}
+              </Button>
+              <Menu
+                anchorEl={anchorEl}
+                open={open}
+                onClose={handleMenuClose}
+                anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
+                transformOrigin={{ vertical: 'top', horizontal: 'right' }}
+              >
+                <MenuItem onClick={() => { navigate('/settings'); handleMenuClose(); }}>
+                  <ListItemIcon>
+                    <AccountCircle fontSize="small" />
+                  </ListItemIcon>
+                  Account Settings
+                </MenuItem>
+                <MenuItem onClick={() => { navigate('/change-password'); handleMenuClose(); }}>
+                  <ListItemIcon>
+                    <Lock fontSize="small" />
+                  </ListItemIcon>
+                  Change Password
+                </MenuItem>
+                <MenuItem onClick={() => { handleLogout(); handleMenuClose(); }}>
+                  <ListItemIcon>
+                    <Logout fontSize="small" />
+                  </ListItemIcon>
+                  Logout
+                </MenuItem>
+              </Menu>
+            </Box>
+          )}
         </Toolbar>
       </AppBar>
       <Box
