@@ -26,6 +26,8 @@ import {
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { formatGermanDateOnly } from '../../utils/dateFormatting';
 
 import { apiService } from '../../services/api';
 
@@ -42,6 +44,7 @@ interface Model {
 }
 
 const Models: React.FC = () => {
+  const { t } = useTranslation();
   const [openDialog, setOpenDialog] = useState(false);
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [formData, setFormData] = useState({
@@ -190,13 +193,13 @@ const Models: React.FC = () => {
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Models</Typography>
+        <Typography variant="h4">{t('models.title')}</Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={() => handleOpenDialog()}
         >
-          Add Model
+          {t('models.addNewModel')}
         </Button>
       </Box>
 
@@ -235,7 +238,7 @@ const Models: React.FC = () => {
                 )}
                 
                 <Typography variant="body2" color="text.secondary">
-                  Created: {new Date(model.created_at).toLocaleDateString()}
+                  Created: {formatGermanDateOnly(model.created_at)}
                 </Typography>
               </CardContent>
               
@@ -245,14 +248,14 @@ const Models: React.FC = () => {
                   startIcon={<RunIcon />}
                   onClick={() => navigate(`/test-runs?model=${model.id}`)}
                 >
-                  Run Test
+                  {t('models.runTest')}
                 </Button>
                 <Button
                   size="small"
                   startIcon={<EditIcon />}
                   onClick={() => handleOpenDialog(model)}
                 >
-                  Edit
+                  {t('common.edit')}
                 </Button>
                 <IconButton
                   size="small"
@@ -292,13 +295,13 @@ const Models: React.FC = () => {
       {/* Add/Edit Model Dialog */}
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>
-          {editingModel ? 'Edit Model' : 'Add New Model'}
+          {editingModel ? t('models.editModel') : t('models.addNewModel')}
         </DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="Model Name"
+            label={t('models.modelName')}
             fullWidth
             variant="outlined"
             value={formData.name}
@@ -313,7 +316,7 @@ const Models: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Description"
+            label={t('models.description')}
             fullWidth
             multiline
             rows={3}
@@ -324,7 +327,7 @@ const Models: React.FC = () => {
           />
           <TextField
             margin="dense"
-            label="Version"
+            label={t('models.version')}
             fullWidth
             variant="outlined"
             value={formData.version}
@@ -334,12 +337,12 @@ const Models: React.FC = () => {
           {/* Advanced Section inside the dialog */}
           <Box sx={{ mt: 2 }}>
             <Button size="small" onClick={() => setAdvancedOpen(v => !v)}>
-              {advancedOpen ? 'Hide Advanced' : 'Show Advanced'}
+              {advancedOpen ? t('models.hideAdvanced') : t('models.showAdvanced')}
             </Button>
             {advancedOpen && (
               <Box sx={{ mt: 2, display: 'grid', gap: 2 }}>
                 <TextField
-                  label="Category"
+                  label={t('models.category')}
                   fullWidth
                   value={advanced.category}
                   onChange={(e) => setAdvanced({ ...advanced, category: e.target.value })}
@@ -351,13 +354,13 @@ const Models: React.FC = () => {
                   onChange={(e) => setAdvanced({ ...advanced, tags: e.target.value })}
                 />
                 <TextField
-                  label="Author"
+                  label={t('models.author')}
                   fullWidth
                   value={advanced.author}
                   onChange={(e) => setAdvanced({ ...advanced, author: e.target.value })}
                 />
                 <TextField
-                  label="Startup Script Path"
+                  label={t('models.startupScriptPath')}
                   fullWidth
                   value={advanced.startup_script}
                   onChange={(e) => setAdvanced({ ...advanced, startup_script: e.target.value })}
@@ -386,17 +389,17 @@ const Models: React.FC = () => {
             variant="contained"
             disabled={!formData.name || createModelMutation.isPending || updateModelMutation.isPending}
           >
-            {editingModel ? 'Update' : 'Create'}
+            {editingModel ? t('common.update') : t('common.create')}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Floating Action Button for Upload */}
-      <Tooltip title="Upload Model">
+      <Tooltip title={t('models.uploadModel')}>
         <Fab
           color="primary"
           sx={{ position: 'fixed', bottom: 16, right: 16 }}
-          onClick={() => {/* Handle file upload */}}
+          onClick={() => handleOpenDialog()}
         >
           <UploadIcon />
         </Fab>

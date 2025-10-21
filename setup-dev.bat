@@ -97,6 +97,11 @@ npm install --legacy-peer-deps
 REM Create environment file
 if not exist ".env" (
     echo REACT_APP_API_URL=http://localhost:8000/api/v1 > .env
+    echo WDS_SOCKET_HOST=localhost >> .env
+    echo DANGEROUSLY_DISABLE_HOST_CHECK=false >> .env
+    echo GENERATE_SOURCEMAP=true >> .env
+    echo FAST_REFRESH=true >> .env
+    echo BROWSER=none >> .env
 )
 
 cd ..

@@ -29,13 +29,13 @@ import {
   Notifications as NotificationsIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../services/api';
 
 
 interface AppSettings {
   general: {
     appName: string;
-    timezone: string;
     language: string;
     autoSave: boolean;
     notifications: boolean;
@@ -68,10 +68,11 @@ interface AppSettings {
 }
 
 const Settings: React.FC = () => {
+  const { t, i18n } = useTranslation();
+  
   const defaultSettings: AppSettings = {
     general: {
       appName: 'MATLAB Automation Platform',
-      timezone: 'UTC',
       language: 'en',
       autoSave: true,
       notifications: true,
@@ -153,7 +154,7 @@ const Settings: React.FC = () => {
       queryClient.invalidateQueries({ queryKey: ['settings'] });
     },
     onError: () => {
-      setSnackbar({ open: true, message: 'Failed to save settings', severity: 'error' });
+      setSnackbar({ open: true, message: t('settings.saveFailed'), severity: 'error' });
     },
   });
 
@@ -178,10 +179,10 @@ const Settings: React.FC = () => {
   };
 
   const tabs = [
-    { id: 'general', label: 'General', icon: <NotificationsIcon /> },
-    { id: 'matlab', label: 'MATLAB', icon: <StorageIcon /> },
-    { id: 'storage', label: 'Storage', icon: <StorageIcon /> },
-    { id: 'security', label: 'Security', icon: <SecurityIcon /> },
+    { id: 'general', label: t('settings.general'), icon: <NotificationsIcon /> },
+    { id: 'matlab', label: t('settings.matlab'), icon: <StorageIcon /> },
+    { id: 'storage', label: t('settings.storage'), icon: <StorageIcon /> },
+    { id: 'security', label: t('settings.security'), icon: <SecurityIcon /> },
   ];
 
   if (isLoading) {
@@ -219,7 +220,7 @@ const Settings: React.FC = () => {
         {/* Settings Navigation */}
         <Grid item xs={12} md={3}>
           <Card>
-            <CardHeader title="Categories" />
+            <CardHeader title={t('settings.categories')} />
             <List>
               {tabs.map((tab) => (
                 <ListItem
@@ -245,43 +246,27 @@ const Settings: React.FC = () => {
                   <Grid item xs={12} sm={6}>
                     <TextField
                       fullWidth
-                      label="Application Name"
+                      label={t('settings.appName')}
                       value={settings.general.appName}
                       onChange={(e) => handleSettingChange('general', 'appName', e.target.value)}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
                     <FormControl fullWidth>
-                      <InputLabel>Timezone</InputLabel>
+                      <InputLabel>{t('settings.language')}</InputLabel>
                       <Select
-                        value={settings.general.timezone}
-                        label="Timezone"
-                        onChange={(e) => handleSettingChange('general', 'timezone', e.target.value)}
+                        value={i18n.language}
+                        label={t('settings.language')}
+                        onChange={(e) => {
+                          i18n.changeLanguage(e.target.value);
+                          handleSettingChange('general', 'language', e.target.value);
+                        }}
                       >
-                        <MenuItem value="UTC">UTC</MenuItem>
-                        <MenuItem value="America/New_York">Eastern Time</MenuItem>
-                        <MenuItem value="America/Chicago">Central Time</MenuItem>
-                        <MenuItem value="America/Denver">Mountain Time</MenuItem>
-                        <MenuItem value="America/Los_Angeles">Pacific Time</MenuItem>
-                        <MenuItem value="Europe/London">London</MenuItem>
-                        <MenuItem value="Europe/Paris">Paris</MenuItem>
-                        <MenuItem value="Asia/Tokyo">Tokyo</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                  <Grid item xs={12} sm={6}>
-                    <FormControl fullWidth>
-                      <InputLabel>Language</InputLabel>
-                      <Select
-                        value={settings.general.language}
-                        label="Language"
-                        onChange={(e) => handleSettingChange('general', 'language', e.target.value)}
-                      >
-                        <MenuItem value="en">English</MenuItem>
-                        <MenuItem value="es">Spanish</MenuItem>
-                        <MenuItem value="fr">French</MenuItem>
-                        <MenuItem value="de">German</MenuItem>
-                        <MenuItem value="zh">Chinese</MenuItem>
+                        <MenuItem value="en">{t('languages.en')}</MenuItem>
+                        <MenuItem value="es">{t('languages.es')}</MenuItem>
+                        <MenuItem value="fr">{t('languages.fr')}</MenuItem>
+                        <MenuItem value="de">{t('languages.de')}</MenuItem>
+                        <MenuItem value="zh">{t('languages.zh')}</MenuItem>
                       </Select>
                     </FormControl>
                   </Grid>
@@ -304,7 +289,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => handleSettingChange('general', 'notifications', e.target.checked)}
                         />
                       }
-                      label="Enable notifications"
+                      label={t('settings.notifications')}
                     />
                   </Grid>
                 </Grid>
@@ -315,7 +300,7 @@ const Settings: React.FC = () => {
                   <Grid item xs={12}>
                     <TextField
                       fullWidth
-                      label="MATLAB Installation Path"
+                      label={t('settings.matlabPath')}
                       value={settings.matlab.matlabPath}
                       onChange={(e) => handleSettingChange('matlab', 'matlabPath', e.target.value)}
                     />
@@ -323,7 +308,7 @@ const Settings: React.FC = () => {
                   <Grid item xs={12}>
                     <TextField
                       fullWidth
-                      label="Simulink Path"
+                      label={t('settings.simulinkPath')}
                       value={settings.matlab.simulinkPath}
                       onChange={(e) => handleSettingChange('matlab', 'simulinkPath', e.target.value)}
                     />
@@ -416,7 +401,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => handleSettingChange('storage', 'backupEnabled', e.target.checked)}
                         />
                       }
-                      label="Enable automatic backups"
+                      label={t('settings.backupEnabled')}
                     />
                   </Grid>
                   <Grid item xs={12} sm={6}>
@@ -424,7 +409,7 @@ const Settings: React.FC = () => {
                       <InputLabel>Backup Frequency</InputLabel>
                       <Select
                         value={settings.storage.backupFrequency}
-                        label="Backup Frequency"
+                        label={t('settings.backupFrequency')}
                         onChange={(e) => handleSettingChange('storage', 'backupFrequency', e.target.value)}
                       >
                         <MenuItem value="hourly">Hourly</MenuItem>
@@ -464,7 +449,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => handleSettingChange('security', 'requireAuth', e.target.checked)}
                         />
                       }
-                      label="Require authentication"
+                      label={t('settings.requireAuth')}
                     />
                   </Grid>
                   <Grid item xs={12}>
@@ -475,7 +460,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => handleSettingChange('security', 'allowGuestAccess', e.target.checked)}
                         />
                       }
-                      label="Allow guest access"
+                      label={t('settings.allowGuestAccess')}
                     />
                   </Grid>
                   <Grid item xs={12}>
@@ -486,7 +471,7 @@ const Settings: React.FC = () => {
                           onChange={(e) => handleSettingChange('security', 'auditLogging', e.target.checked)}
                         />
                       }
-                      label="Enable audit logging"
+                      label={t('settings.auditLogging')}
                     />
                   </Grid>
                 </Grid>

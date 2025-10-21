@@ -16,8 +16,10 @@
     "@types/react-dom": "^18.2.15",
     "axios": "^1.6.2",
     "date-fns": "^2.30.0",
+    "i18next": "^23.7.6",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-i18next": "^13.5.0",
     "react-router-dom": "^6.18.0",
     "react-scripts": "5.0.1",
     "recharts": "^2.8.0",
@@ -25,6 +27,7 @@
     "web-vitals": "^3.5.0"
   },
   "devDependencies": {
+    "@craco/craco": "^7.1.0",
     "@testing-library/jest-dom": "^6.1.4",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^14.5.1",
@@ -35,8 +38,9 @@
     "prettier": "^3.1.0"
   },
   "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
+    "start": "set REACT_APP_API_URL=http://localhost:8000/api/v1&& craco start",
+    "start:dev": "set REACT_APP_API_URL=http://localhost:8000/api/v1&& set GENERATE_SOURCEMAP=true&& craco start",
+    "build": "craco build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "lint": "eslint src --ext .ts,.tsx",

@@ -42,6 +42,7 @@ import {
   Cell,
 } from 'recharts';
 import { useQuery } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
 import { DatePicker } from '@mui/x-date-pickers/DatePicker';
 import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
 import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
@@ -52,6 +53,7 @@ import { apiService } from '../../services/api';
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8'];
 
 const Reports: React.FC = () => {
+  const { t } = useTranslation();
   const [dateRange, setDateRange] = useState({
     start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), // 30 days ago
     end: new Date(),
@@ -61,27 +63,38 @@ const Reports: React.FC = () => {
   // Fetch reports data
   const { data: reportData, isLoading } = useQuery({
     queryKey: ['reports', dateRange, selectedModel],
-    queryFn: () => {
-      // Mock data for now - replace with actual API call
-      return Promise.resolve({
-        totalTests: 150,
-        successfulTests: 135,
-        failedTests: 15,
-        averageExecutionTime: 45.2,
-        testTrends: [
-          { date: '2024-01-01', total: 10, successful: 9, failed: 1 },
-          { date: '2024-01-02', total: 15, successful: 14, failed: 1 },
-          { date: '2024-01-03', total: 12, successful: 11, failed: 1 },
-        ],
-        modelPerformance: [
-          { modelName: 'Model A', successRate: 95, averageTime: 42, totalTests: 50 },
-          { modelName: 'Model B', successRate: 88, averageTime: 48, totalTests: 40 },
-        ],
-        statusDistribution: [
-          { status: 'Completed', count: 135, percentage: 90 },
-          { status: 'Failed', count: 15, percentage: 10 },
-        ],
-      });
+    queryFn: async () => {
+      try {
+        const params = {
+          start_date: dateRange.start.toISOString().split('T')[0],
+          end_date: dateRange.end.toISOString().split('T')[0],
+          model_id: selectedModel !== 'all' ? selectedModel : undefined,
+        };
+
+        const [analyticsResponse, trendsResponse, performanceResponse] = await Promise.all([
+          apiService.reports.getAnalytics(params),
+          apiService.reports.getTestTrends(params),
+          apiService.reports.getModelPerformance(params),
+        ]);
+
+        return {
+          ...analyticsResponse.data,
+          testTrends: trendsResponse.data,
+          modelPerformance: performanceResponse.data,
+        };
+      } catch (error) {
+        console.error('Error fetching reports data:', error);
+        // Fallback to mock data if API fails
+        return {
+          totalTests: 0,
+          successfulTests: 0,
+          failedTests: 0,
+          averageExecutionTime: 0,
+          testTrends: [],
+          modelPerformance: [],
+          statusDistribution: [],
+        };
+      }
     },
   });
 
@@ -91,9 +104,33 @@ const Reports: React.FC = () => {
     queryFn: () => apiService.models.list().then(res => res.data),
   });
 
-  const handleExportReport = (format: 'pdf' | 'excel') => {
-    // Handle report export
-    console.log(`Exporting report as ${format}`);
+  const handleExportReport = async (format: 'pdf' | 'excel') => {
+    try {
+      const params = {
+        start_date: dateRange.start.toISOString().split('T')[0],
+        end_date: dateRange.end.toISOString().split('T')[0],
+        model_id: selectedModel !== 'all' ? selectedModel : undefined,
+      };
+
+      const response = format === 'pdf' 
+        ? await apiService.reports.exportPDF(params)
+        : await apiService.reports.exportExcel(params);
+
+      const blob = new Blob([response.data], { 
+        type: format === 'pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+      });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `reports-${dateRange.start.toISOString().split('T')[0]}-to-${dateRange.end.toISOString().split('T')[0]}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error(`Error exporting ${format} report:`, error);
+      // You could add a snackbar notification here
+    }
   };
 
   if (isLoading) {
@@ -120,21 +157,21 @@ const Reports: React.FC = () => {
     <LocalizationProvider dateAdapter={AdapterDateFns}>
       <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-          <Typography variant="h4">Reports & Analytics</Typography>
+          <Typography variant="h4">{t('reports.title')}</Typography>
           <Box display="flex" gap={2}>
             <Button
               variant="outlined"
               startIcon={<DownloadIcon />}
               onClick={() => handleExportReport('pdf')}
             >
-              Export PDF
+              {t('reports.exportPdf')}
             </Button>
             <Button
               variant="outlined"
               startIcon={<DownloadIcon />}
               onClick={() => handleExportReport('excel')}
             >
-              Export Excel
+              {t('reports.exportExcel')}
             </Button>
           </Box>
         </Box>
@@ -144,7 +181,7 @@ const Reports: React.FC = () => {
           <Grid container spacing={2} alignItems="center">
             <Grid item xs={12} sm={6} md={3}>
               <DatePicker
-                label="Start Date"
+                label={t('reports.startDate')}
                 value={dateRange.start}
                 onChange={(newValue) => setDateRange({ ...dateRange, start: newValue || new Date() })}
                 slotProps={{ textField: { fullWidth: true } }}
@@ -152,7 +189,7 @@ const Reports: React.FC = () => {
             </Grid>
             <Grid item xs={12} sm={6} md={3}>
               <DatePicker
-                label="End Date"
+                label={t('reports.endDate')}
                 value={dateRange.end}
                 onChange={(newValue) => setDateRange({ ...dateRange, end: newValue || new Date() })}
                 slotProps={{ textField: { fullWidth: true } }}
@@ -163,7 +200,7 @@ const Reports: React.FC = () => {
                 <InputLabel>Model</InputLabel>
                 <Select
                   value={selectedModel}
-                  label="Model"
+                  label={t('reports.model')}
                   onChange={(e) => setSelectedModel(e.target.value)}
                 >
                   <MenuItem value="all">All Models</MenuItem>
@@ -196,7 +233,7 @@ const Reports: React.FC = () => {
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Typography color="textSecondary" gutterBottom>
-                      Total Tests
+                      {t('reports.totalTests')}
                     </Typography>
                     <Typography variant="h4">
                       {data.totalTests}
@@ -213,7 +250,7 @@ const Reports: React.FC = () => {
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Typography color="textSecondary" gutterBottom>
-                      Success Rate
+                      {t('reports.successRate')}
                     </Typography>
                     <Typography variant="h4">
                       {successRate.toFixed(1)}%
@@ -230,7 +267,7 @@ const Reports: React.FC = () => {
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Typography color="textSecondary" gutterBottom>
-                      Failed Tests
+                      {t('reports.failedTests')}
                     </Typography>
                     <Typography variant="h4" color="error">
                       {data.failedTests}
@@ -247,7 +284,7 @@ const Reports: React.FC = () => {
                 <Box display="flex" alignItems="center" justifyContent="space-between">
                   <Box>
                     <Typography color="textSecondary" gutterBottom>
-                      Avg. Execution Time
+                      {t('reports.avgExecutionTime')}
                     </Typography>
                     <Typography variant="h4">
                       {data.averageExecutionTime.toFixed(1)}s
@@ -276,9 +313,9 @@ const Reports: React.FC = () => {
                     <YAxis />
                     <RechartsTooltip />
                     <Legend />
-                    <Line type="monotone" dataKey="total" stroke="#8884d8" name="Total Tests" />
-                    <Line type="monotone" dataKey="successful" stroke="#82ca9d" name="Successful" />
-                    <Line type="monotone" dataKey="failed" stroke="#ffc658" name="Failed" />
+                    <Line type="monotone" dataKey="total" stroke="#8884d8" name={t('reports.totalTests')} />
+                    <Line type="monotone" dataKey="successful" stroke="#82ca9d" name={t('reports.successful')} />
+                    <Line type="monotone" dataKey="failed" stroke="#ffc658" name={t('reports.failed')} />
                   </LineChart>
                 </ResponsiveContainer>
               </CardContent>
@@ -304,7 +341,7 @@ const Reports: React.FC = () => {
                       fill="#8884d8"
                       dataKey="count"
                     >
-                      {data.statusDistribution.map((entry, index) => (
+                      {data.statusDistribution.map((entry: any, index: number) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -356,7 +393,7 @@ const Reports: React.FC = () => {
                       </TableRow>
                     </TableHead>
                     <TableBody>
-                      {data.modelPerformance.map((model, index) => (
+                      {data.modelPerformance.map((model: any, index: number) => (
                         <TableRow key={index}>
                           <TableCell>{model.modelName}</TableCell>
                           <TableCell align="right">{model.totalTests}</TableCell>
@@ -370,7 +407,7 @@ const Reports: React.FC = () => {
                           <TableCell align="right">{model.averageTime.toFixed(2)}</TableCell>
                           <TableCell align="right">
                             <Chip
-                              label={model.successRate >= 90 ? 'Excellent' : model.successRate >= 70 ? 'Good' : 'Needs Improvement'}
+                              label={model.successRate >= 90 ? t('reports.excellent') : model.successRate >= 70 ? t('reports.good') : t('reports.needsImprovement')}
                               color={model.successRate >= 90 ? 'success' : model.successRate >= 70 ? 'warning' : 'error'}
                               size="small"
                             />

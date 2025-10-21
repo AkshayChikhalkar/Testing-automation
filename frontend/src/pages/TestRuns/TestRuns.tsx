@@ -38,6 +38,8 @@ import {
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { formatGermanDate } from '../../utils/dateFormatting';
 
 import { apiService, default as apiClient } from '../../services/api';
 
@@ -56,6 +58,7 @@ interface TestRun {
 }
 
 const TestRuns: React.FC = () => {
+  const { t } = useTranslation();
   const [openDialog, setOpenDialog] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -160,6 +163,24 @@ const TestRuns: React.FC = () => {
     }
   };
 
+  const handleDownloadResults = async (id: number) => {
+    try {
+      const response = await apiService.testRuns.downloadResults(id);
+      const blob = new Blob([response.data], { type: 'application/octet-stream' });
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `test-run-${id}-results.zip`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      console.error('Error downloading results:', error);
+      // You could add a snackbar notification here
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'success';
@@ -190,13 +211,13 @@ const TestRuns: React.FC = () => {
   return (
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">Test Runs</Typography>
+        <Typography variant="h4">{t('testRuns.title')}</Typography>
         <Button
           variant="contained"
           startIcon={<AddIcon />}
           onClick={handleOpenDialog}
         >
-          New Test Run
+          {t('testRuns.createTestRun')}
         </Button>
       </Box>
 
@@ -205,13 +226,13 @@ const TestRuns: React.FC = () => {
           <Table>
             <TableHead>
               <TableRow>
-                <TableCell>Name</TableCell>
-                <TableCell>Model</TableCell>
-                <TableCell>Status</TableCell>
-                <TableCell>Progress</TableCell>
-                <TableCell>Start Time</TableCell>
-                <TableCell>Duration</TableCell>
-                <TableCell>Actions</TableCell>
+                <TableCell>{t('testRuns.name')}</TableCell>
+                <TableCell>{t('testRuns.model')}</TableCell>
+                <TableCell>{t('testRuns.status')}</TableCell>
+                <TableCell>{t('testRuns.progress')}</TableCell>
+                <TableCell>{t('testRuns.startTime')}</TableCell>
+                <TableCell>{t('testRuns.duration')}</TableCell>
+                <TableCell>{t('testRuns.actions')}</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -247,7 +268,7 @@ const TestRuns: React.FC = () => {
                     )}
                   </TableCell>
                   <TableCell>
-                    {new Date(testRun.start_time).toLocaleString()}
+                    {formatGermanDate(testRun.start_time)}
                   </TableCell>
                   <TableCell>
                     {formatDuration(testRun.execution_time)}
@@ -255,7 +276,7 @@ const TestRuns: React.FC = () => {
                   <TableCell>
                     <Box display="flex" gap={1}>
                       {testRun.status === 'pending' && (
-                        <Tooltip title="Start Test">
+                        <Tooltip title={t('testRuns.startTest')}>
                           <IconButton
                             size="small"
                             color="primary"
@@ -266,7 +287,7 @@ const TestRuns: React.FC = () => {
                         </Tooltip>
                       )}
                       {testRun.status === 'running' && (
-                        <Tooltip title="Stop Test">
+                        <Tooltip title={t('testRuns.stopTest')}>
                           <IconButton
                             size="small"
                             color="error"
@@ -276,7 +297,7 @@ const TestRuns: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       )}
-                      <Tooltip title="View Details">
+                      <Tooltip title={t('testRuns.viewDetails')}>
                         <IconButton
                           size="small"
                           onClick={() => navigate(`/test-runs/${testRun.id}`)}
@@ -285,16 +306,16 @@ const TestRuns: React.FC = () => {
                         </IconButton>
                       </Tooltip>
                       {testRun.status === 'completed' && (
-                        <Tooltip title="Download Results">
+                        <Tooltip title={t('testRuns.downloadResults')}>
                           <IconButton
                             size="small"
-                            onClick={() => {/* Handle download */}}
+                            onClick={() => handleDownloadResults(testRun.id)}
                           >
                             <DownloadIcon />
                           </IconButton>
                         </Tooltip>
                       )}
-                      <Tooltip title="Delete">
+                      <Tooltip title={t('common.delete')}>
                         <IconButton
                           size="small"
                           color="error"
@@ -334,12 +355,12 @@ const TestRuns: React.FC = () => {
 
       {/* New Test Run Dialog */}
       <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Create New Test Run</DialogTitle>
+        <DialogTitle>{t('testRuns.createTestRun')}</DialogTitle>
         <DialogContent>
           <TextField
             autoFocus
             margin="dense"
-            label="Test Run Name"
+            label={t('testRuns.testRunName')}
             fullWidth
             variant="outlined"
             value={formData.name}
@@ -358,7 +379,7 @@ const TestRuns: React.FC = () => {
             <InputLabel>Model</InputLabel>
             <Select
               value={formData.model_id}
-              label="Model"
+              label={t('testRuns.model')}
               onChange={(e) => setFormData({ ...formData, model_id: e.target.value })}
             >
               {models.map((model: any) => (
@@ -400,7 +421,7 @@ const TestRuns: React.FC = () => {
       </Dialog>
 
       {/* Floating Action Button */}
-      <Tooltip title="Refresh">
+      <Tooltip title={t('common.refresh')}>
         <Fab
           color="primary"
           sx={{ position: 'fixed', bottom: 16, right: 16 }}

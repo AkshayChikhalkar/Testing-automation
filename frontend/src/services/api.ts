@@ -81,12 +81,23 @@ export const apiService = {
     getResults: (id: number) => apiClient.get(`/test-runs/${id}/results`),
     generateReport: (id: number) => apiClient.post(`/test-runs/${id}/report`),
     getStatus: (id: number) => apiClient.get(`/test-runs/${id}/status`),
+    downloadResults: (id: number) => apiClient.get(`/test-runs/${id}/download`, { responseType: 'blob' }),
+    downloadLogs: (id: number) => apiClient.get(`/test-runs/${id}/logs/download`, { responseType: 'blob' }),
   },
 
   // Users endpoints
   users: {
     list: (params?: any) => apiClient.get('/users', { params }),
     get: (id: number) => apiClient.get(`/users/${id}`),
+  },
+
+  // Reports endpoints
+  reports: {
+    getAnalytics: (params?: any) => apiClient.get('/reports/analytics', { params }),
+    getTestTrends: (params?: any) => apiClient.get('/reports/trends', { params }),
+    getModelPerformance: (params?: any) => apiClient.get('/reports/model-performance', { params }),
+    exportPDF: (params?: any) => apiClient.get('/reports/export/pdf', { params, responseType: 'blob' }),
+    exportExcel: (params?: any) => apiClient.get('/reports/export/excel', { params, responseType: 'blob' }),
   },
 
   // Dashboard data

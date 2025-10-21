@@ -4,10 +4,14 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider, createTheme } from '@mui/material/styles';
 import CssBaseline from '@mui/material/CssBaseline';
 
+// Import i18n configuration
+import './i18n';
+
 import Layout from './components/Layout/Layout';
 import Dashboard from './pages/Dashboard/Dashboard';
 import Models from './pages/Models/Models';
 import TestRuns from './pages/TestRuns/TestRuns';
+import TestRunDetail from './pages/TestRuns/TestRunDetail';
 import Reports from './pages/Reports/Reports';
 import Settings from './pages/Settings/Settings';
 import Login from './pages/Login/Login';
@@ -67,6 +71,7 @@ function App() {
               <Route path="/dashboard" element={<Dashboard />} />
               <Route path="/models" element={<Models />} />
               <Route path="/test-runs" element={<TestRuns />} />
+              <Route path="/test-runs/:id" element={<TestRunDetail />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/change-password" element={<ChangePassword />} />

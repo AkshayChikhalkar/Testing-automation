@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379"
     
     # MATLAB Configuration
-    MATLAB_PATH: str = "/usr/local/MATLAB/R2023b"
+    MATLAB_PATH: str = "C:\\Program Files\\MATLAB\\R2023b"
     MATLAB_LICENSE_SERVER: Optional[str] = None
     MATLAB_ENGINE_TIMEOUT: int = 300
     

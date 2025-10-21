@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Box, Card, CardContent, TextField, Button, Typography, Alert, Link } from '@mui/material';
 import { Link as RouterLink } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import apiClient from '../../services/api';
 import { useNavigate } from 'react-router-dom';
 
 const Login: React.FC = () => {
+  const { t } = useTranslation();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +27,7 @@ const Login: React.FC = () => {
       if (refresh_token) localStorage.setItem('refresh_token', refresh_token);
       navigate('/dashboard');
     } catch (err: any) {
-      setError(err?.response?.data?.detail || 'Login failed');
+      setError(err?.response?.data?.detail || t('auth.loginFailed'));
     }
   };
 
@@ -33,15 +35,15 @@ const Login: React.FC = () => {
     <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
       <Card sx={{ width: 380 }}>
         <CardContent>
-          <Typography variant="h5" mb={2}>Sign in</Typography>
+          <Typography variant="h5" mb={2}>{t('auth.login')}</Typography>
           {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
           <form onSubmit={handleSubmit}>
-            <TextField fullWidth margin="normal" label="Username" value={username} onChange={(e) => setUsername(e.target.value)} />
-            <TextField fullWidth margin="normal" type="password" label="Password" value={password} onChange={(e) => setPassword(e.target.value)} />
-            <Button fullWidth variant="contained" type="submit" sx={{ mt: 2 }}>Login</Button>
+            <TextField fullWidth margin="normal" label={t('auth.username')} value={username} onChange={(e) => setUsername(e.target.value)} />
+            <TextField fullWidth margin="normal" type="password" label={t('auth.password')} value={password} onChange={(e) => setPassword(e.target.value)} />
+            <Button fullWidth variant="contained" type="submit" sx={{ mt: 2 }}>{t('auth.login')}</Button>
           </form>
           <Box display="flex" justifyContent="space-between" mt={2}>
-            <Link component={RouterLink} to="/signup">Don't have an account? Sign Up</Link>
+            <Link component={RouterLink} to="/signup">{t('auth.signup')}</Link>
           </Box>
         </CardContent>
       </Card>
