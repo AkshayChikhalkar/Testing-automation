@@ -23,6 +23,8 @@ import {
   Delete as DeleteIcon,
   PlayArrow as RunIcon,
   Upload as UploadIcon,
+  FolderOpen as FolderIcon,
+  Launch as LaunchIcon,
 } from '@mui/icons-material';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
@@ -30,6 +32,7 @@ import { useTranslation } from 'react-i18next';
 import { formatGermanDateOnly } from '../../utils/dateFormatting';
 
 import { apiService } from '../../services/api';
+import ModelDirectoryUpload from '../../components/ModelDirectoryUpload';
 
 interface Model {
   id: number;
@@ -39,13 +42,17 @@ interface Model {
   status: 'active' | 'inactive' | 'training';
   created_at: string;
   updated_at: string;
-  file_size: number;
+  file_size?: number;
   accuracy?: number;
+  model_type?: 'file' | 'directory';
+  model_directory?: string;
+  startup_script?: string;
 }
 
 const Models: React.FC = () => {
   const { t } = useTranslation();
   const [openDialog, setOpenDialog] = useState(false);
+  const [openDirectoryDialog, setOpenDirectoryDialog] = useState(false);
   const [editingModel, setEditingModel] = useState<Model | null>(null);
   const [formData, setFormData] = useState({
     name: '',
@@ -98,6 +105,24 @@ const Models: React.FC = () => {
     },
   });
 
+  const uploadDirectoryMutation = useMutation({
+    mutationFn: (formData: FormData) => apiService.models.uploadDirectory(formData),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['models'] });
+      setOpenDirectoryDialog(false);
+    },
+  });
+
+  const launchModelMutation = useMutation({
+    mutationFn: apiService.models.launch,
+    onSuccess: (response) => {
+      alert(`Model launched successfully! ${response.data.message || ''}`);
+    },
+    onError: (error: any) => {
+      alert(`Failed to launch model: ${error.response?.data?.detail || error.message}`);
+    },
+  });
+
   const resetForm = () => {
     setFormData({ name: '', description: '', version: '1.0.0' });
     setEditingModel(null);
@@ -109,6 +134,19 @@ const Models: React.FC = () => {
 
   const handleOpenDialog = (model?: Model) => {
     if (model) {
+      // For directory models, show directory-specific edit dialog
+      if (model.model_type === 'directory') {
+        setEditingModel(model);
+        setFormData({
+          name: model.name,
+          description: model.description,
+          version: model.version,
+        });
+        setOpenDirectoryDialog(true);
+        return;
+      }
+      
+      // For file models, show regular edit dialog
       setEditingModel(model);
       setFormData({
         name: model.name,
@@ -165,6 +203,48 @@ const Models: React.FC = () => {
     }
   };
 
+  const handleDirectoryUpload = (data: any) => {
+    if (editingModel) {
+      // Update existing directory model
+      updateModelMutation.mutate({ 
+        id: editingModel.id, 
+        data: {
+          name: data.name,
+          description: data.description,
+          version: data.version,
+          category: data.category,
+          author: data.author,
+          tags: data.tags,
+          parameters: JSON.parse(data.parameters),
+        }
+      });
+    } else {
+      // Create new directory model
+      const formData = new FormData();
+      formData.append('name', data.name);
+      formData.append('description', data.description || '');
+      formData.append('directory_path', data.directory_path);
+      formData.append('version', data.version);
+      formData.append('category', data.category || '');
+      formData.append('author', data.author || '');
+      formData.append('tags', JSON.stringify(data.tags));
+      formData.append('parameters', data.parameters);
+
+      uploadDirectoryMutation.mutate(formData);
+    }
+  };
+
+  const handleLaunchModel = (model: Model) => {
+    if (model.model_type === 'directory') {
+      if (window.confirm(`Launch directory model "${model.name}"? This will run the startup script directly without creating a test run.`)) {
+        launchModelMutation.mutate(model.id);
+      }
+    } else {
+      // For file-based models, navigate to test runs
+      navigate(`/test-runs?model=${model.id}`);
+    }
+  };
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'success';
@@ -194,13 +274,22 @@ const Models: React.FC = () => {
     <Box sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
       <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
         <Typography variant="h4">{t('models.title')}</Typography>
-        <Button
-          variant="contained"
-          startIcon={<AddIcon />}
-          onClick={() => handleOpenDialog()}
-        >
-          {t('models.addNewModel')}
-        </Button>
+        <Box display="flex" gap={2}>
+          <Button
+            variant="outlined"
+            startIcon={<FolderIcon />}
+            onClick={() => setOpenDirectoryDialog(true)}
+          >
+            Upload Directory
+          </Button>
+          <Button
+            variant="contained"
+            startIcon={<AddIcon />}
+            onClick={() => handleOpenDialog()}
+          >
+            {t('models.addNewModel')}
+          </Button>
+        </Box>
       </Box>
 
       <Grid container spacing={3} sx={{ flexGrow: 1, overflow: 'auto' }}>
@@ -212,11 +301,21 @@ const Models: React.FC = () => {
                   <Typography variant="h6" component="div">
                     {model.name}
                   </Typography>
-                  <Chip
-                    label={model.status}
-                    color={getStatusColor(model.status) as any}
-                    size="small"
-                  />
+                  <Box display="flex" gap={1}>
+                    {model.model_type === 'directory' && (
+                      <Chip
+                        label="Directory"
+                        color="primary"
+                        size="small"
+                        icon={<FolderIcon />}
+                      />
+                    )}
+                    <Chip
+                      label={model.status}
+                      color={getStatusColor(model.status) as any}
+                      size="small"
+                    />
+                  </Box>
                 </Box>
                 
                 <Typography variant="body2" color="text.secondary" gutterBottom>
@@ -227,9 +326,35 @@ const Models: React.FC = () => {
                   Version: {model.version}
                 </Typography>
                 
-                <Typography variant="body2" color="text.secondary">
-                  Size: {formatFileSize(model.file_size)}
-                </Typography>
+                {model.file_size && (
+                  <Typography variant="body2" color="text.secondary">
+                    Size: {formatFileSize(model.file_size)}
+                  </Typography>
+                )}
+
+                {model.model_type === 'directory' && model.model_directory && (
+                  <Typography variant="body2" color="text.secondary" sx={{ 
+                    fontFamily: 'monospace', 
+                    fontSize: '0.75rem',
+                    wordBreak: 'break-all',
+                    mt: 1,
+                    p: 1,
+                    bgcolor: 'grey.100',
+                    borderRadius: 1
+                  }}>
+                    📁 {model.model_directory}
+                  </Typography>
+                )}
+
+                {model.startup_script && (
+                  <Typography variant="body2" color="text.secondary" sx={{ 
+                    fontFamily: 'monospace', 
+                    fontSize: '0.75rem',
+                    mt: 1
+                  }}>
+                    🚀 {model.startup_script.split('/').pop()}
+                  </Typography>
+                )}
                 
                 {model.accuracy && (
                   <Typography variant="body2" color="text.secondary">
@@ -243,13 +368,25 @@ const Models: React.FC = () => {
               </CardContent>
               
               <CardActions>
-                <Button
-                  size="small"
-                  startIcon={<RunIcon />}
-                  onClick={() => navigate(`/test-runs?model=${model.id}`)}
-                >
-                  {t('models.runTest')}
-                </Button>
+                {model.model_type === 'directory' ? (
+                  <Button
+                    size="small"
+                    startIcon={<LaunchIcon />}
+                    onClick={() => handleLaunchModel(model)}
+                    disabled={launchModelMutation.isPending}
+                    color="primary"
+                  >
+                    {launchModelMutation.isPending ? 'Launching...' : 'Launch Model'}
+                  </Button>
+                ) : (
+                  <Button
+                    size="small"
+                    startIcon={<RunIcon />}
+                    onClick={() => handleLaunchModel(model)}
+                  >
+                    {t('models.runTest')}
+                  </Button>
+                )}
                 <Button
                   size="small"
                   startIcon={<EditIcon />}
@@ -393,6 +530,15 @@ const Models: React.FC = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Directory Upload Dialog */}
+      <ModelDirectoryUpload
+        open={openDirectoryDialog}
+        onClose={() => setOpenDirectoryDialog(false)}
+        onSubmit={handleDirectoryUpload}
+        loading={uploadDirectoryMutation.isPending}
+        editingModel={editingModel}
+      />
 
       {/* Floating Action Button for Upload */}
       <Tooltip title={t('models.uploadModel')}>

@@ -23,6 +23,8 @@ class Model(Base):
     
     # Model configuration
     startup_script = Column(String(500))  # Path to startup script
+    model_directory = Column(String(500))  # Path to model directory
+    model_type = Column(String(20), default="file")  # 'file' or 'directory'
     input_schema = Column(JSON)  # JSON schema for input validation
     output_schema = Column(JSON)  # JSON schema for output validation
     parameters = Column(JSON)  # Model parameters and default values

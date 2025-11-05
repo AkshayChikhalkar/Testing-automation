@@ -69,6 +69,10 @@ export const apiService = {
     upload: (formData: FormData) => apiClient.post('/models/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+    uploadDirectory: (formData: FormData) => apiClient.post('/models/upload-directory', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }),
+    launch: (id: number) => apiClient.post(`/models/${id}/launch`),
   },
 
   // Test runs endpoints

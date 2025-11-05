@@ -14,7 +14,7 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.models.model import Model
 from app.services.matlab_service import MATLABService
-from app.schemas.model import ModelCreate, ModelUpdate, ModelResponse, ModelListResponse
+from app.schemas.model import ModelCreate, ModelUpdate, ModelResponse, ModelListResponse, DirectoryModelCreate
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -239,6 +239,181 @@ async def get_model_info(model_id: int, db: AsyncSession = Depends(get_async_db)
     except Exception as e:
         logger.error("Failed to get model info", model_id=model_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get model info")
+
+
+@router.post("/upload-directory")
+async def upload_model_directory(
+    directory_path: str = Form(...),
+    name: str = Form(...),
+    description: Optional[str] = Form(None),
+    version: Optional[str] = Form("1.0.0"),
+    category: Optional[str] = Form(None),
+    author: Optional[str] = Form(None),
+    tags: Optional[str] = Form(None),  # comma-separated or JSON array
+    parameters: Optional[str] = Form(None),  # JSON object as string
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user),
+):
+    """Upload a model directory (like simulationsmodelle-main)"""
+    try:
+        # Validate directory exists
+        if not os.path.exists(directory_path):
+            raise HTTPException(status_code=400, detail="Directory does not exist")
+        
+        if not os.path.isdir(directory_path):
+            raise HTTPException(status_code=400, detail="Path is not a directory")
+        
+        # Look for startup scripts in priority order
+        startup_scripts = []
+        
+        # Priority 1: Look for startup*.m files in MODEL_* directories
+        for root, dirs, files in os.walk(directory_path):
+            if any('MODEL_' in d for d in root.split(os.sep)):
+                for file in files:
+                    if file.endswith('.m') and file.lower().startswith('startup'):
+                        startup_scripts.append(os.path.join(root, file))
+        
+        # Priority 2: Look for any startup*.m files anywhere
+        if not startup_scripts:
+            for root, dirs, files in os.walk(directory_path):
+                for file in files:
+                    if file.endswith('.m') and file.lower().startswith('startup'):
+                        startup_scripts.append(os.path.join(root, file))
+        
+        # Priority 3: Look for init*.m files in MODEL_* directories
+        if not startup_scripts:
+            for root, dirs, files in os.walk(directory_path):
+                if any('MODEL_' in d for d in root.split(os.sep)):
+                    for file in files:
+                        if file.endswith('.m') and file.lower().startswith('init'):
+                            startup_scripts.append(os.path.join(root, file))
+        
+        # Priority 4: Any .m files in MODEL_* directories
+        if not startup_scripts:
+            for root, dirs, files in os.walk(directory_path):
+                if any('MODEL_' in d for d in root.split(os.sep)):
+                    for file in files:
+                        if file.endswith('.m'):
+                            startup_scripts.append(os.path.join(root, file))
+        
+        # Use the first startup script found, or None
+        startup_script = startup_scripts[0] if startup_scripts else None
+        
+        # Parse optional complex fields
+        parsed_tags = None
+        if tags:
+            try:
+                import json
+                parsed_tags = json.loads(tags) if tags.startswith('[') else [tag.strip() for tag in tags.split(',')]
+            except:
+                parsed_tags = [tag.strip() for tag in tags.split(',')]
+        
+        parsed_parameters = None
+        if parameters:
+            try:
+                import json
+                parsed_parameters = json.loads(parameters)
+            except:
+                parsed_parameters = {}
+        
+        # Create model instance
+        model = Model(
+            name=name,
+            description=description,
+            model_directory=directory_path,
+            model_type="directory",
+            startup_script=startup_script,
+            version=version,
+            category=category,
+            author=author,
+            tags=parsed_tags,
+            parameters=parsed_parameters,
+            created_by=current_user.id,
+            is_active=True,
+            is_validated=False
+        )
+        
+        db.add(model)
+        await db.commit()
+        await db.refresh(model)
+        
+        logger.info("Directory model created", model_id=model.id, name=model.name, directory=directory_path)
+        return model
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to create directory model", error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to create directory model")
+
+
+@router.post("/{model_id}/launch")
+async def launch_model(
+    model_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user),
+):
+    """Launch a MATLAB model (especially directory-based models)"""
+    try:
+        result = await db.execute(select(Model).where(Model.id == model_id))
+        model = result.scalar_one_or_none()
+        
+        if not model:
+            raise HTTPException(status_code=404, detail="Model not found")
+        
+        # Check if user has access to this model
+        if not (current_user.is_superuser or model.created_by == current_user.id):
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Initialize MATLAB service
+        matlab_service = MATLABService()
+        await matlab_service.initialize()
+        
+        # Launch model based on type
+        if model.model_type == "directory" and model.model_directory:
+            # For directory-based models, run the startup script
+            if model.startup_script and os.path.exists(model.startup_script):
+                # Change to the startup script directory
+                startup_dir = os.path.dirname(model.startup_script)
+                startup_name = os.path.basename(model.startup_script).replace('.m', '')
+                
+                # Run the startup script
+                matlab_service.engine.cd(startup_dir)
+                matlab_service.engine.eval(f"run('{startup_name}')")
+                
+                logger.info("Directory model launched", model_id=model_id, startup_script=model.startup_script)
+                return {
+                    "model_id": model_id,
+                    "status": "launched",
+                    "message": f"Model launched successfully using startup script: {os.path.basename(model.startup_script)}",
+                    "startup_script": model.startup_script
+                }
+            else:
+                raise HTTPException(status_code=400, detail="No valid startup script found for directory model")
+        
+        elif model.file_path and os.path.exists(model.file_path):
+            # For file-based models, execute normally
+            result = await matlab_service.execute_model(
+                model_path=model.file_path,
+                input_data={},
+                startup_script=model.startup_script
+            )
+            
+            logger.info("File model executed", model_id=model_id, file_path=model.file_path)
+            return {
+                "model_id": model_id,
+                "status": "executed",
+                "result": result
+            }
+        
+        else:
+            raise HTTPException(status_code=400, detail="Model file or directory not found")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to launch model", model_id=model_id, error=str(e))
+        raise HTTPException(status_code=500, detail=f"Failed to launch model: {str(e)}")
 
 
 @router.post("/upload")

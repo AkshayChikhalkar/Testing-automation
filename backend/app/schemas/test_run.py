@@ -20,9 +20,16 @@ class TestRunBase(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
-class TestRunCreate(TestRunBase):
+class TestRunCreate(BaseModel):
     """Schema for creating a test run"""
-    pass
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = None
+    model_id: int
+    input_data: Optional[Dict[str, Any]] = None
+    configuration: Optional[Dict[str, Any]] = None
+    hardware_config: Optional[Dict[str, Any]] = None
+    
+    model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
 class TestRunUpdate(BaseModel):
