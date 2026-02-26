@@ -2,12 +2,16 @@
 Test run execution endpoints
 """
 
+import io
+import json
+import zipfile
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
+from fastapi.responses import StreamingResponse
 import os
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from datetime import datetime
+from sqlalchemy import select, delete
+from datetime import datetime, timezone
 import structlog
 
 from app.core.database import get_async_db
@@ -15,9 +19,10 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.models.test_run import TestRun
 from app.models.model import Model
+from app.models.data_point import DataPoint
 from app.services.matlab_service import MATLABService
 from app.schemas.test_run import TestRunCreate, TestRunResponse, TestRunListResponse
-from app.tasks.matlab_tasks import execute_model_task
+from app.tasks.matlab_tasks import execute_model_task, run_test_run_execution
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -54,6 +59,18 @@ async def list_test_runs(
         # Convert to response format with model names
         response_data = []
         for test_run in test_runs:
+            exec_time = test_run.execution_time
+            if exec_time is None and test_run.start_time and test_run.end_time:
+                try:
+                    st = test_run.start_time
+                    et = test_run.end_time
+                    if st.tzinfo is None:
+                        st = st.replace(tzinfo=timezone.utc)
+                    if et.tzinfo is None:
+                        et = et.replace(tzinfo=timezone.utc)
+                    exec_time = (et - st).total_seconds()
+                except (TypeError, ValueError, AttributeError):
+                    pass
             test_run_dict = {
                 "id": test_run.id,
                 "name": test_run.name,
@@ -61,9 +78,10 @@ async def list_test_runs(
                 "model_name": test_run.model.name if test_run.model else None,
                 "user_id": test_run.user_id,
                 "status": test_run.status,
-                "execution_time": test_run.execution_time,
+                "execution_time": exec_time,
                 "start_time": test_run.start_time,
                 "end_time": test_run.end_time,
+                "error_message": test_run.error_message,
                 "created_at": test_run.created_at,
             }
             response_data.append(test_run_dict)
@@ -78,13 +96,20 @@ async def list_test_runs(
 async def get_test_run(test_run_id: int, db: AsyncSession = Depends(get_async_db), current_user = Depends(get_current_user)):
     """Get a specific test run by ID"""
     try:
-        result = await db.execute(select(TestRun).where(TestRun.id == test_run_id))
+        from sqlalchemy.orm import selectinload
+        result = await db.execute(
+            select(TestRun).where(TestRun.id == test_run_id).options(selectinload(TestRun.model))
+        )
         test_run = result.scalar_one_or_none()
         
         if not test_run:
             raise HTTPException(status_code=404, detail="Test run not found")
         
-        return test_run
+        # Build response with model_name for UI
+        resp = TestRunResponse.model_validate(test_run)
+        if test_run.model:
+            resp.model_name = test_run.model.name
+        return resp
     except HTTPException:
         raise
     except Exception as e:
@@ -123,15 +148,9 @@ async def create_test_run(
         await db.commit()
         await db.refresh(test_run)
         
-        # Start execution in background
-        background_tasks.add_task(
-            execute_model_task,
-            test_run.id,
-            model.file_path,
-            test_run_data.input_data,
-            model.startup_script
-        )
-        
+        # Start execution in background (uses Simulation Runner for directory models)
+        background_tasks.add_task(run_test_run_execution, test_run.id)
+
         logger.info("Test run created", test_run_id=test_run.id, model_id=model.id)
         return test_run
     except HTTPException:
@@ -143,13 +162,12 @@ async def create_test_run(
 
 @router.post("/create-with-input", response_model=TestRunResponse)
 async def create_test_run_with_input(
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     model_id: int = Form(...),
-    user_id: int = Form(...),
+    input_file: UploadFile = File(...),
     description: Optional[str] = Form(None),
     configuration: Optional[str] = Form(None),  # JSON string
-    input_file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = None,
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(get_current_user)
 ):
@@ -201,13 +219,7 @@ async def create_test_run_with_input(
 
         # Start background execution if requested
         if background_tasks is not None:
-            background_tasks.add_task(
-                execute_model_task,
-                test_run.id,
-                model.file_path,
-                input_data,
-                model.startup_script,
-            )
+            background_tasks.add_task(run_test_run_execution, test_run.id)
 
         logger.info("Test run created with input file", test_run_id=test_run.id, model_id=model.id)
         return test_run
@@ -244,18 +256,12 @@ async def execute_test_run(
         
         # Update status to running
         test_run.status = "running"
-        test_run.start_time = datetime.utcnow()
+        test_run.start_time = datetime.now(timezone.utc)
         await db.commit()
         
-        # Start execution in background
-        background_tasks.add_task(
-            execute_model_task,
-            test_run.id,
-            model.file_path,
-            test_run.input_data,
-            model.startup_script
-        )
-        
+        # Start execution in background (uses Simulation Runner for directory models)
+        background_tasks.add_task(run_test_run_execution, test_run.id)
+
         logger.info("Test run execution started", test_run_id=test_run.id)
         return {"message": "Test run execution started", "test_run_id": test_run.id}
     except HTTPException:
@@ -263,6 +269,36 @@ async def execute_test_run(
     except Exception as e:
         logger.error("Failed to execute test run", test_run_id=test_run_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to execute test run")
+
+
+@router.delete("/{test_run_id}")
+async def delete_test_run(
+    test_run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    """Delete a test run and its data points"""
+    try:
+        result = await db.execute(select(TestRun).where(TestRun.id == test_run_id))
+        test_run = result.scalar_one_or_none()
+
+        if not test_run:
+            raise HTTPException(status_code=404, detail="Test run not found")
+
+        if not (current_user.is_superuser or test_run.user_id == current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this test run")
+
+        await db.execute(delete(DataPoint).where(DataPoint.test_run_id == test_run_id))
+        await db.delete(test_run)
+        await db.commit()
+
+        logger.info("Test run deleted", test_run_id=test_run_id)
+        return {"message": "Test run deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to delete test run", test_run_id=test_run_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to delete test run")
 
 
 @router.post("/{test_run_id}/cancel")
@@ -280,7 +316,7 @@ async def cancel_test_run(test_run_id: int, db: AsyncSession = Depends(get_async
         
         # Update status to cancelled
         test_run.status = "cancelled"
-        test_run.end_time = datetime.utcnow()
+        test_run.end_time = datetime.now(timezone.utc)
         await db.commit()
         
         logger.info("Test run cancelled", test_run_id=test_run.id)
@@ -368,3 +404,80 @@ async def get_test_run_status(test_run_id: int, db: AsyncSession = Depends(get_a
     except Exception as e:
         logger.error("Failed to get test run status", test_run_id=test_run_id, error=str(e))
         raise HTTPException(status_code=500, detail="Failed to get test run status")
+
+
+@router.get("/{test_run_id}/download", response_class=StreamingResponse)
+async def download_test_run_results(
+    test_run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    """Download test run results as a ZIP file (results, output, metadata)"""
+    try:
+        result = await db.execute(select(TestRun).where(TestRun.id == test_run_id))
+        test_run = result.scalar_one_or_none()
+
+        if not test_run:
+            raise HTTPException(status_code=404, detail="Test run not found")
+
+        if not (current_user.is_superuser or test_run.user_id == current_user.id):
+            raise HTTPException(status_code=403, detail="Not authorized to download this test run")
+
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+            # Metadata
+            meta = {
+                "id": test_run.id,
+                "name": test_run.name,
+                "model_id": test_run.model_id,
+                "status": test_run.status,
+                "start_time": str(test_run.start_time) if test_run.start_time else None,
+                "end_time": str(test_run.end_time) if test_run.end_time else None,
+                "execution_time": test_run.execution_time,
+                "error_message": test_run.error_message,
+            }
+            zf.writestr("metadata.json", json.dumps(meta, indent=2))
+
+            # Results (structured test metrics)
+            if test_run.results is not None:
+                zf.writestr("results.json", json.dumps(test_run.results, indent=2))
+
+            # Console output (MATLAB/simulation logs)
+            output_data = test_run.output_data or {}
+            console_output = output_data.get("output", "") if isinstance(output_data, dict) else ""
+            if console_output:
+                zf.writestr("console_output.txt", console_output, zipfile.ZIP_DEFLATED)
+
+            # Output data summary (paths, structure - without huge output text)
+            output_meta = {k: v for k, v in (output_data or {}).items() if k != "output"}
+            if output_meta:
+                zf.writestr("output_info.json", json.dumps(output_meta, indent=2))
+
+            # Add .mat and .json files from simulation output directory
+            output_dir = None
+            if isinstance(output_data, dict):
+                output_dir = output_data.get("output_directory")
+            if output_dir and os.path.isdir(output_dir):
+                for fname in sorted(os.listdir(output_dir)):
+                    if fname.endswith((".mat", ".json")):
+                        fpath = os.path.join(output_dir, fname)
+                        if os.path.isfile(fpath):
+                            try:
+                                arcname = f"simulation_output/{fname}"
+                                zf.write(fpath, arcname=arcname)
+                            except Exception as e:
+                                logger.warning("Could not add file to ZIP", path=fpath, error=str(e))
+
+        buffer.seek(0)
+        return StreamingResponse(
+            buffer,
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="test-run-{test_run_id}-results.zip"',
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to download test run results", test_run_id=test_run_id, error=str(e))
+        raise HTTPException(status_code=500, detail="Failed to download test run results")

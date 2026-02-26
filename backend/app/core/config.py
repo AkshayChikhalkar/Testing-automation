@@ -50,6 +50,10 @@ class Settings(BaseSettings):
     INFLUXDB_ORG: str = "matlab-automation"
     INFLUXDB_BUCKET: str = "test-data"
     
+    # Simulationsmodelle project path (for MATLAB CLI execution)
+    # Path to the simulationsmodelle repo containing run_simulation.py
+    SIMULATIONS_PROJECT_PATH: Optional[str] = None
+    
     # Email
     SMTP_HOST: Optional[str] = None
     SMTP_PORT: int = 587

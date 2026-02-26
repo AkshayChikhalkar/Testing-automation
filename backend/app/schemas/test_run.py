@@ -52,6 +52,7 @@ class TestRunResponse(TestRunBase):
     error_message: Optional[str] = None
     results: Optional[Dict[str, Any]] = None
     report_path: Optional[str] = None
+    model_name: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -69,6 +70,7 @@ class TestRunListResponse(BaseModel):
     execution_time: Optional[float] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    error_message: Optional[str] = None
     created_at: datetime
     
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())

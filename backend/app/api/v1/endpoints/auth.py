@@ -9,7 +9,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from datetime import datetime
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 
 from app.core.database import get_async_db
 from app.core.security import (
@@ -45,15 +45,17 @@ async def login(
     return {"access_token": access_token, "refresh_token": refresh_token, "token_type": "bearer"}
 
 
+class RefreshTokenBody(BaseModel):
+    refresh_token: str
+
+
 @router.post("/refresh")
-async def refresh_token(
-    refresh_token: str,
-):
+async def refresh_token(body: RefreshTokenBody):
     from jose import jwt, JWTError
     from app.core.config import settings
 
     try:
-        payload = jwt.decode(refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
+        payload = jwt.decode(body.refresh_token, settings.SECRET_KEY, algorithms=[settings.JWT_ALGORITHM])
         if payload.get("type") != "refresh":
             raise HTTPException(status_code=401, detail="Invalid token type")
         username = payload.get("sub")
@@ -129,7 +131,7 @@ async def update_profile(
 
 class SignUpBody(BaseModel):
     username: str
-    email: EmailStr
+    email: str
     password: str
     full_name: Optional[str] = None
 

@@ -2,20 +2,35 @@
 Celery tasks for MATLAB model execution
 """
 
+import json
+import os
+from pathlib import Path
 from typing import Dict, Any, Optional
 from celery import current_task
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, update
-from datetime import datetime
+from sqlalchemy.ext.asyncio import AsyncSession
+from datetime import datetime, timezone
 import time
+import asyncio
 import structlog
 
 from app.core.celery import celery_app
-from app.core.database import AsyncSessionLocal
+from app.core.database import AsyncSessionLocal, SessionLocal
 from app.models.test_run import TestRun
+from app.models.model import Model
 from app.services.matlab_service import MATLABService
+from app.services.simulation_runner_service import SimulationRunnerService
 
 logger = structlog.get_logger()
+
+# Max length for stored error messages (avoid verbose logs in DB/UI)
+ERROR_MSG_MAX_LEN = 200
+
+
+def _short_error(msg: str) -> str:
+    """Extract concise error message (first line, max length)"""
+    first = (msg.split("\n")[0] or msg).strip()
+    return first[:ERROR_MSG_MAX_LEN] + ("..." if len(first) > ERROR_MSG_MAX_LEN else "")
 
 
 @celery_app.task(bind=True, name="execute_model")
@@ -54,7 +69,7 @@ def execute_model_task(
                     .where(TestRun.id == test_run_id)
                     .values(
                         status="running",
-                        start_time=datetime.utcnow()
+                        start_time=datetime.now(timezone.utc)
                     )
                 )
                 await db.commit()
@@ -81,7 +96,7 @@ def execute_model_task(
                     .where(TestRun.id == test_run_id)
                     .values(
                         status="completed",
-                        end_time=datetime.utcnow(),
+                        end_time=datetime.now(timezone.utc),
                         execution_time=execution_time,
                         output_data=result.get("output_data", {}),
                         results=result.get("results", {})
@@ -115,7 +130,7 @@ def execute_model_task(
                     .where(TestRun.id == test_run_id)
                     .values(
                         status="failed",
-                        end_time=datetime.utcnow(),
+                        end_time=datetime.now(timezone.utc),
                         error_message=str(e)
                     )
                 )
@@ -128,8 +143,161 @@ def execute_model_task(
                 }
     
     # Run the async function
-    import asyncio
     return asyncio.run(_execute_model())
+
+
+def run_test_run_execution(test_run_id: int) -> None:
+    """
+    Execute a test run - used by FastAPI BackgroundTasks.
+    Uses SimulationRunnerService (subprocess/run_simulation.py) for directory models
+    when MATLAB Engine is not available. Falls back to MATLAB Engine for file models.
+
+    This is a sync function for background task compatibility.
+    """
+    print(f"\n{'='*60}\n[TEST RUN] Starting execution for test_run_id={test_run_id}\n{'='*60}", flush=True)
+    db = SessionLocal()
+    try:
+        test_run = db.execute(select(TestRun).where(TestRun.id == test_run_id)).scalar_one_or_none()
+        if not test_run:
+            logger.error("Test run not found", test_run_id=test_run_id)
+            return
+
+        model = db.execute(select(Model).where(Model.id == test_run.model_id)).scalar_one_or_none()
+        if not model:
+            logger.error("Model not found", model_id=test_run.model_id)
+            test_run.status = "failed"
+            test_run.error_message = "Model not found"
+            test_run.end_time = datetime.now(timezone.utc)
+            db.commit()
+            return
+
+        # Directory model: use SimulationRunnerService (run_simulation.py) - no MATLAB Engine needed
+        if model.model_type == "directory" and model.model_directory:
+            sim_runner = SimulationRunnerService()
+            if not sim_runner.is_available():
+                print(f"[TEST RUN] Simulation Runner not available - cannot execute directory model", flush=True)
+            elif sim_runner.is_available():
+                # Set running so UI shows correct status during execution (create flow doesn't set it)
+                test_run.status = "running"
+                if not test_run.start_time:
+                    test_run.start_time = datetime.now(timezone.utc)
+                db.commit()
+                print(f"[TEST RUN] Executing directory model via Simulation Runner: {model.model_directory}", flush=True)
+                logger.info(
+                    "Executing directory model via Simulation Runner",
+                    test_run_id=test_run_id,
+                    model_directory=model.model_directory,
+                )
+                params_json = None
+                params_file = None
+                batch_mode = False
+                if test_run.configuration and isinstance(test_run.configuration, dict):
+                    params_json = test_run.configuration.get("parameters")
+                if test_run.input_data and isinstance(test_run.input_data, dict):
+                    file_path = test_run.input_data.get("file_path")
+                    if file_path:
+                        path_str = str(file_path).replace("/", os.sep)
+                        path_str = str(Path(path_str).resolve()) if not os.path.isabs(path_str) else path_str
+                        if os.path.isfile(path_str):
+                            if path_str.endswith(".json"):
+                                try:
+                                    with open(path_str, "r", encoding="utf-8") as f:
+                                        params_json = json.load(f)
+                                except Exception:
+                                    pass
+                            elif path_str.endswith(".csv"):
+                                params_file = path_str
+                                batch_mode = True
+
+                result = sim_runner.run_simulation(
+                    project_directory=model.model_directory,
+                    params_file=params_file,
+                    params_json=params_json,
+                    batch_mode=batch_mode,
+                    startup_script=model.startup_script,
+                )
+                test_run.end_time = datetime.now(timezone.utc)
+                if test_run.start_time and test_run.end_time:
+                    try:
+                        st = test_run.start_time
+                        if st.tzinfo is None:
+                            st = st.replace(tzinfo=timezone.utc)
+                        delta = test_run.end_time - st
+                        test_run.execution_time = delta.total_seconds()
+                    except (TypeError, ValueError):
+                        pass
+                if result.get("success"):
+                    print(f"[TEST RUN] Simulation completed successfully for test_run_id={test_run_id} (exit code: {result.get('return_code', '?')})", flush=True)
+                    test_run.status = "completed"
+                    test_run.output_data = {
+                        "output": result.get("output", ""),
+                        "output_directory": result.get("output_directory"),
+                    }
+                    test_run.error_message = None
+                    logger.info("Simulation completed", test_run_id=test_run_id)
+                else:
+                    rc = result.get("return_code", "?")
+                    err = result.get("error", "Simulation failed")
+                    print(f"[TEST RUN] Simulation failed for test_run_id={test_run_id}: {err} (exit code: {rc})", flush=True)
+                    test_run.status = "failed"
+                    test_run.error_message = _short_error(err)
+                    # Still store output and output_dir for debugging even when failed
+                    test_run.output_data = {
+                        "output": result.get("output", ""),
+                        "output_directory": result.get("output_directory"),
+                    }
+                    logger.error(
+                        "Simulation failed",
+                        test_run_id=test_run_id,
+                        error=err,
+                        return_code=rc,
+                    )
+                try:
+                    db.commit()
+                except Exception as commit_err:
+                    logger.exception("Failed to commit test run result", test_run_id=test_run_id, error=str(commit_err))
+                    db.rollback()
+                    # Refetch and store user-friendly message: execution succeeded but DB write failed
+                    tr = db.execute(select(TestRun).where(TestRun.id == test_run_id)).scalar_one_or_none()
+                    if tr:
+                        tr.status = "failed"
+                        tr.end_time = datetime.now(timezone.utc)
+                        tr.error_message = _short_error(
+                            f"Execution completed successfully but failed to save results. {commit_err!s}"
+                        )
+                        try:
+                            db.commit()
+                        except Exception:
+                            db.rollback()
+                    return
+                return
+
+        # File model or directory model without Simulation Runner: require MATLAB Engine
+        # Note: execute_model_task uses AsyncSession which conflicts with BackgroundTasks
+        # thread (event loop). So we fail with clear message instead.
+        error_msg = (
+            "MATLAB Engine is not available for in-process execution. "
+            "For directory models, ensure simulationsmodelle is a sibling directory. "
+            "For file models, install: pip install matlabengine (from MATLAB)."
+        )
+        logger.warning("Cannot execute file model from background task", test_run_id=test_run_id)
+        test_run.status = "failed"
+        test_run.end_time = datetime.now(timezone.utc)
+        test_run.error_message = error_msg
+        db.commit()
+    except Exception as e:
+        logger.exception("Test run execution failed", test_run_id=test_run_id, error=str(e))
+        try:
+            test_run = db.execute(select(TestRun).where(TestRun.id == test_run_id)).scalar_one_or_none()
+            if test_run:
+                test_run.status = "failed"
+                test_run.end_time = datetime.now(timezone.utc)
+                test_run.error_message = _short_error(str(e))
+                db.commit()
+        except Exception:
+            db.rollback()
+    finally:
+        db.close()
 
 
 @celery_app.task(name="validate_model")
