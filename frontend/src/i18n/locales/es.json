@@ -39,7 +39,13 @@
     "paste": "Pegar",
     "cut": "Cortar",
     "undo": "Deshacer",
-    "redo": "Rehacer"
+    "redo": "Rehacer",
+    "viewDetails": "Ver detalles",
+    "cancelled": "Cancelado",
+    "completed": "Completado",
+    "failed": "Fallido",
+    "pending": "Pendiente",
+    "running": "En ejecución"
   },
   "navigation": {
     "dashboard": "Panel de Control",

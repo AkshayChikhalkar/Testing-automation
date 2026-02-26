@@ -41,14 +41,23 @@
     "undo": "Undo",
     "redo": "Redo",
     "viewDetails": "View Details",
-    "cancelled": "Cancelled"
+    "cancelled": "Cancelled",
+    "completed": "Completed",
+    "failed": "Failed",
+    "pending": "Pending",
+    "running": "Running"
   },
   "navigation": {
     "dashboard": "Dashboard",
     "models": "Models",
     "testRuns": "Test Runs",
+    "simulationRunner": "Simulation Runner",
     "reports": "Reports",
     "settings": "Settings"
+  },
+  "simulationRunner": {
+    "title": "MATLAB Simulation Runner",
+    "description": "Run models with custom params (CLI)"
   },
   "auth": {
     "login": "Login",

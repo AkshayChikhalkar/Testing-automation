@@ -39,7 +39,13 @@
     "paste": "Coller",
     "cut": "Couper",
     "undo": "Annuler",
-    "redo": "Refaire"
+    "redo": "Refaire",
+    "viewDetails": "Voir les détails",
+    "cancelled": "Annulé",
+    "completed": "Terminé",
+    "failed": "Échoué",
+    "pending": "En attente",
+    "running": "En cours"
   },
   "navigation": {
     "dashboard": "Tableau de Bord",

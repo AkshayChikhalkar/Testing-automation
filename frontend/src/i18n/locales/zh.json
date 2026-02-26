@@ -39,7 +39,13 @@
     "paste": "粘贴",
     "cut": "剪切",
     "undo": "撤销",
-    "redo": "重做"
+    "redo": "重做",
+    "viewDetails": "查看详情",
+    "cancelled": "已取消",
+    "completed": "已完成",
+    "failed": "失败",
+    "pending": "待处理",
+    "running": "运行中"
   },
   "navigation": {
     "dashboard": "仪表板",

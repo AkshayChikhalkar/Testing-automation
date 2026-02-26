@@ -41,12 +41,21 @@
     "undo": "Rückgängig",
     "redo": "Wiederholen",
     "viewDetails": "Details anzeigen",
-    "cancelled": "Abgebrochen"
+    "cancelled": "Abgebrochen",
+    "completed": "Abgeschlossen",
+    "failed": "Fehlgeschlagen",
+    "pending": "Ausstehend",
+    "running": "Läuft"
+  },
+  "simulationRunner": {
+    "title": "MATLAB Simulationsläufer",
+    "description": "Modelle mit benutzerdefinierten Parametern ausführen"
   },
   "navigation": {
     "dashboard": "Dashboard",
     "models": "Modelle",
     "testRuns": "Testläufe",
+    "simulationRunner": "Simulationsläufer",
     "reports": "Berichte",
     "settings": "Einstellungen"
   },
