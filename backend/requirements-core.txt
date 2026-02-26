@@ -1,5 +1,6 @@
 # Core Framework - Essential for running the application
-fastapi==0.104.1
+# FastAPI 0.115+ required for Pydantic 2.11+ (FieldInfo.in_ fix)
+fastapi>=0.115.0,<0.116.0
 uvicorn[standard]==0.24.0
 pydantic==2.5.0
 pydantic-settings==2.1.0
