@@ -5,15 +5,16 @@
 
 /**
  * Format a date string to German format
- * @param dateString - ISO date string or Date object
- * @returns Formatted German date string (DD.MM.YYYY HH:mm:ss)
+ * @param dateString - ISO date string, Date object, or null/undefined
+ * @returns Formatted German date string (DD.MM.YYYY HH:mm:ss) or 'N/A'
  */
-export const formatGermanDate = (dateString: string | Date): string => {
+export const formatGermanDate = (dateString: string | Date | null | undefined): string => {
+  if (dateString == null) return 'N/A';
   const date = new Date(dateString);
   
-  // Check if date is valid
-  if (isNaN(date.getTime())) {
-    return 'Ungültiges Datum';
+  // Check if date is valid (reject epoch 0 which often indicates null)
+  if (isNaN(date.getTime()) || date.getTime() === 0) {
+    return 'N/A';
   }
   
   // Format to German format: DD.MM.YYYY HH:mm:ss

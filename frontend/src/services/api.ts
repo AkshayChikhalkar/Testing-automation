@@ -95,6 +95,16 @@ export const apiService = {
     get: (id: number) => apiClient.get(`/users/${id}`),
   },
 
+  // Simulations / MATLAB CLI runner (simulationsmodelle)
+  simulations: {
+    getRunnerStatus: () => apiClient.get('/simulations/runner/status'),
+    getRunnerModels: () => apiClient.get('/simulations/runner/models'),
+    run: (formData: FormData) => apiClient.post('/simulations/runner/run', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      timeout: 600000, // 10 min for long simulations
+    }),
+  },
+
   // Reports endpoints
   reports: {
     getAnalytics: (params?: any) => apiClient.get('/reports/analytics', { params }),
