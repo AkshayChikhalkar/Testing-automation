@@ -41,7 +41,7 @@ const TestRunDetail: React.FC = () => {
   const queryClient = useQueryClient();
   const [expandedLogs, setExpandedLogs] = useState(false);
 
-  // Fetch test run details
+  // Fetch test run details - poll when pending/running for live status updates
   const { data: testRun, isLoading, error } = useQuery({
     queryKey: ['testRun', id],
     queryFn: async () => {
@@ -49,6 +49,10 @@ const TestRunDetail: React.FC = () => {
       return response.data;
     },
     enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data as { status?: string };
+      return data?.status === 'pending' || data?.status === 'running' ? 2000 : false;
+    },
   });
 
   // Start/Stop test run mutations
@@ -327,7 +331,17 @@ const TestRunDetail: React.FC = () => {
               </Typography>
               <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
                 <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
-                  {JSON.stringify(testRun.parameters, null, 2)}
+                  {(() => {
+                    const params = testRun.configuration?.parameters ?? testRun.parameters;
+                    const config = testRun.configuration;
+                    if (params != null && typeof params === 'object' && Object.keys(params).length > 0) {
+                      return JSON.stringify(params, null, 2);
+                    }
+                    if (config != null && typeof config === 'object' && Object.keys(config).length > 0) {
+                      return JSON.stringify(config, null, 2);
+                    }
+                    return 'No parameters specified';
+                  })()}
                 </pre>
               </Paper>
             </CardContent>

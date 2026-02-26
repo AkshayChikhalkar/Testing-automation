@@ -12,6 +12,7 @@ import Dashboard from './pages/Dashboard/Dashboard';
 import Models from './pages/Models/Models';
 import TestRuns from './pages/TestRuns/TestRuns';
 import TestRunDetail from './pages/TestRuns/TestRunDetail';
+import SimulationRunner from './pages/SimulationRunner/SimulationRunner';
 import Reports from './pages/Reports/Reports';
 import Settings from './pages/Settings/Settings';
 import Login from './pages/Login/Login';
@@ -72,6 +73,7 @@ function App() {
               <Route path="/models" element={<Models />} />
               <Route path="/test-runs" element={<TestRuns />} />
               <Route path="/test-runs/:id" element={<TestRunDetail />} />
+              <Route path="/simulation-runner" element={<SimulationRunner />} />
               <Route path="/reports" element={<Reports />} />
               <Route path="/settings" element={<Settings />} />
               <Route path="/change-password" element={<ChangePassword />} />

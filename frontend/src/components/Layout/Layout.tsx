@@ -27,6 +27,7 @@ import {
   Dashboard as DashboardIcon,
   ModelTraining as ModelsIcon,
   PlayArrow as TestRunsIcon,
+  Code as SimulationIcon,
   Assessment as ReportsIcon,
   Settings as SettingsIcon,
   ChevronLeft,
@@ -125,6 +126,13 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
       path: '/test-runs',
       color: '#2e7d32',
       description: t('testRuns.title')
+    },
+    { 
+      text: t('navigation.simulationRunner'), 
+      icon: <SimulationIcon />, 
+      path: '/simulation-runner',
+      color: '#0288d1',
+      description: t('simulationRunner.description')
     },
     { 
       text: t('navigation.reports'), 

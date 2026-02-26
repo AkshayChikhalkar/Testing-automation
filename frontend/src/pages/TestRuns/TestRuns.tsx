@@ -55,6 +55,7 @@ interface TestRun {
   progress?: number;
   results?: any;
   parameters: any;
+  error_message?: string | null;
 }
 
 const TestRuns: React.FC = () => {
@@ -71,10 +72,15 @@ const TestRuns: React.FC = () => {
   const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
 
-  // Fetch test runs
+  // Fetch test runs - poll every 2s when any run is pending/running for live status updates
   const { data: testRuns = [], isLoading } = useQuery({
     queryKey: ['testRuns'],
     queryFn: () => apiService.testRuns.list().then(res => res.data),
+    refetchInterval: (query) => {
+      const data = query.state.data as TestRun[];
+      const hasActive = data?.some((r: TestRun) => r.status === 'pending' || r.status === 'running');
+      return hasActive ? 2000 : false;
+    },
   });
 
   // Fetch models for dropdown
@@ -99,7 +105,11 @@ const TestRuns: React.FC = () => {
           headers: { 'Content-Type': 'multipart/form-data' },
         });
       }
-      return apiService.testRuns.create(data);
+      return apiService.testRuns.create({
+        name: data.name,
+        model_id: data.model_id,
+        configuration: data.parameters != null ? { parameters: data.parameters } : undefined,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['testRuns'] });
@@ -192,6 +202,11 @@ const TestRuns: React.FC = () => {
     }
   };
 
+  const getShortErrorMessage = (msg: string) => {
+    const firstLine = msg.split(/\r?\n/)[0]?.trim() || msg;
+    return firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine;
+  };
+
   const formatDuration = (seconds?: number) => {
     if (!seconds) return 'N/A';
     const hours = Math.floor(seconds / 3600);
@@ -237,96 +252,112 @@ const TestRuns: React.FC = () => {
             </TableHead>
             <TableBody>
               {testRuns.map((testRun: TestRun) => (
-                <TableRow key={testRun.id}>
-                  <TableCell>
-                    <Typography variant="subtitle2">{testRun.name}</Typography>
-                  </TableCell>
-                  <TableCell>{testRun.model_name}</TableCell>
-                  <TableCell>
-                    <Chip
-                      label={testRun.status}
-                      color={getStatusColor(testRun.status) as any}
-                      size="small"
-                    />
-                  </TableCell>
-                  <TableCell>
-                    {testRun.status === 'running' && testRun.progress !== undefined ? (
-                      <Box sx={{ width: 100 }}>
-                        <LinearProgress 
-                          variant="determinate" 
-                          value={testRun.progress} 
-                          sx={{ mb: 1 }}
+                <React.Fragment key={testRun.id}>
+                  <TableRow>
+                    <TableCell>
+                      <Typography variant="subtitle2">{testRun.name}</Typography>
+                    </TableCell>
+                    <TableCell>{testRun.model_name}</TableCell>
+                    <TableCell>
+                      <Box>
+                        <Chip
+                          label={testRun.status}
+                          color={getStatusColor(testRun.status) as any}
+                          size="small"
                         />
-                        <Typography variant="caption">
-                          {testRun.progress}%
-                        </Typography>
+                        {testRun.error_message && (
+                          <Tooltip title={testRun.error_message}>
+                            <Typography
+                              variant="caption"
+                              display="block"
+                              color="error.main"
+                              sx={{ mt: 0.5, lineHeight: 1.2 }}
+                            >
+                              {getShortErrorMessage(testRun.error_message)}
+                            </Typography>
+                          </Tooltip>
+                        )}
                       </Box>
-                    ) : (
-                      <Typography variant="body2" color="text.secondary">
-                        {testRun.status === 'completed' ? '100%' : 'N/A'}
-                      </Typography>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {formatGermanDate(testRun.start_time)}
-                  </TableCell>
-                  <TableCell>
-                    {formatDuration(testRun.execution_time)}
-                  </TableCell>
-                  <TableCell>
-                    <Box display="flex" gap={1}>
-                      {testRun.status === 'pending' && (
-                        <Tooltip title={t('testRuns.startTest')}>
+                    </TableCell>
+                    <TableCell>
+                      {testRun.status === 'running' && testRun.progress !== undefined ? (
+                        <Box sx={{ width: 100 }}>
+                          <LinearProgress 
+                            variant="determinate" 
+                            value={testRun.progress} 
+                            sx={{ mb: 1 }}
+                          />
+                          <Typography variant="caption">
+                            {testRun.progress}%
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          {testRun.status === 'completed' ? '100%' : 'N/A'}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {formatGermanDate(testRun.start_time)}
+                    </TableCell>
+                    <TableCell>
+                      {formatDuration(testRun.execution_time)}
+                    </TableCell>
+                    <TableCell>
+                      <Box display="flex" gap={1}>
+                        {testRun.status === 'pending' && (
+                          <Tooltip title={t('testRuns.startTest')}>
+                            <IconButton
+                              size="small"
+                              color="primary"
+                              onClick={() => handleStart(testRun.id)}
+                            >
+                              <PlayIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        {testRun.status === 'running' && (
+                          <Tooltip title={t('testRuns.stopTest')}>
+                            <IconButton
+                              size="small"
+                              color="error"
+                              onClick={() => handleStop(testRun.id)}
+                            >
+                              <StopIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title={t('testRuns.viewDetails')}>
                           <IconButton
                             size="small"
-                            color="primary"
-                            onClick={() => handleStart(testRun.id)}
+                            onClick={() => navigate(`/test-runs/${testRun.id}`)}
                           >
-                            <PlayIcon />
+                            <ViewIcon />
                           </IconButton>
                         </Tooltip>
-                      )}
-                      {testRun.status === 'running' && (
-                        <Tooltip title={t('testRuns.stopTest')}>
+                        {testRun.status === 'completed' && (
+                          <Tooltip title={t('testRuns.downloadResults')}>
+                            <IconButton
+                              size="small"
+                              onClick={() => handleDownloadResults(testRun.id)}
+                            >
+                              <DownloadIcon />
+                            </IconButton>
+                          </Tooltip>
+                        )}
+                        <Tooltip title={t('common.delete')}>
                           <IconButton
                             size="small"
                             color="error"
-                            onClick={() => handleStop(testRun.id)}
+                            onClick={() => handleDelete(testRun.id)}
                           >
-                            <StopIcon />
+                            <DeleteIcon />
                           </IconButton>
                         </Tooltip>
-                      )}
-                      <Tooltip title={t('testRuns.viewDetails')}>
-                        <IconButton
-                          size="small"
-                          onClick={() => navigate(`/test-runs/${testRun.id}`)}
-                        >
-                          <ViewIcon />
-                        </IconButton>
-                      </Tooltip>
-                      {testRun.status === 'completed' && (
-                        <Tooltip title={t('testRuns.downloadResults')}>
-                          <IconButton
-                            size="small"
-                            onClick={() => handleDownloadResults(testRun.id)}
-                          >
-                            <DownloadIcon />
-                          </IconButton>
-                        </Tooltip>
-                      )}
-                      <Tooltip title={t('common.delete')}>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDelete(testRun.id)}
-                        >
-                          <DeleteIcon />
-                        </IconButton>
-                      </Tooltip>
-                    </Box>
-                  </TableCell>
-                </TableRow>
+                      </Box>
+                    </TableCell>
+                  </TableRow>
+                </React.Fragment>
               ))}
             </TableBody>
           </Table>
