@@ -78,6 +78,7 @@ async def list_test_runs(
                 "name": test_run.name,
                 "model_id": test_run.model_id,
                 "model_name": test_run.model.name if test_run.model else None,
+                "simulation_id": test_run.simulation_id,
                 "user_id": test_run.user_id,
                 "status": test_run.status,
                 "execution_time": exec_time,

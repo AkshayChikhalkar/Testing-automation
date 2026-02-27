@@ -66,6 +66,7 @@ class TestRunListResponse(BaseModel):
     name: str
     model_id: int
     model_name: Optional[str] = None
+    simulation_id: Optional[str] = None
     user_id: int
     status: str
     execution_time: Optional[float] = None
