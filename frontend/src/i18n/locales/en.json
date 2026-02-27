@@ -3,7 +3,7 @@
     "dashboard": "Dashboard",
     "models": "Models",
     "testRuns": "Test Runs",
-    "reports": "Reports",
+    "reports": "Analytics",
     "settings": "Settings",
     "login": "Login",
     "logout": "Logout",
@@ -52,7 +52,7 @@
     "models": "Models",
     "testRuns": "Test Runs",
     "simulationRunner": "Simulation Runner",
-    "reports": "Reports",
+    "reports": "Analytics",
     "settings": "Settings"
   },
   "simulationRunner": {
@@ -92,7 +92,7 @@
     "viewAll": "View All",
     "manageModels": "Manage Models",
     "runTests": "Run Tests",
-    "viewReports": "View Reports",
+    "viewReports": "View Analytics",
     "model": "Model",
     "noRecentTestRuns": "No recent test runs found",
     "startFirstTestRun": "Start your first test run to see results here",
@@ -153,7 +153,7 @@
     "statusCancelled": "Cancelled"
   },
   "reports": {
-    "title": "Reports",
+    "title": "Analytics",
     "generateReport": "Generate Report",
     "reportType": "Report Type",
     "dateRange": "Date Range",

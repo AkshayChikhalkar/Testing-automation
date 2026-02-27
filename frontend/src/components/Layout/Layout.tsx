@@ -750,8 +750,8 @@ const Layout: React.FC<LayoutProps> = ({ children }) => {
             border: '1px solid rgba(0, 0, 0, 0.05)',
           }}
         >
-          <Box sx={{ p: 3 }}>
-          {children}
+          <Box sx={{ p: 1, height: '100%', boxSizing: 'border-box' }}>
+            {children}
           </Box>
         </Box>
       </Box>

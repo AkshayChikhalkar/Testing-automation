@@ -13,7 +13,7 @@ import Models from './pages/Models/Models';
 import TestRuns from './pages/TestRuns/TestRuns';
 import TestRunDetail from './pages/TestRuns/TestRunDetail';
 import SimulationRunner from './pages/SimulationRunner/SimulationRunner';
-import Reports from './pages/Reports/Reports';
+import Reports from './pages/Reports';
 import Settings from './pages/Settings/Settings';
 import Login from './pages/Login/Login';
 import ChangePassword from './pages/Settings/ChangePassword';
