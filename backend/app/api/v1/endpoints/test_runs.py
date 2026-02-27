@@ -2,6 +2,7 @@
 Test run execution endpoints
 """
 
+import csv
 import io
 import json
 import zipfile
@@ -23,6 +24,7 @@ from app.models.data_point import DataPoint
 from app.services.matlab_service import MATLABService
 from app.schemas.test_run import TestRunCreate, TestRunResponse, TestRunListResponse
 from app.tasks.matlab_tasks import execute_model_task, run_test_run_execution
+from app.services.influxdb_service import get_simulation_ids_in_time_range
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -109,6 +111,8 @@ async def get_test_run(test_run_id: int, db: AsyncSession = Depends(get_async_db
         resp = TestRunResponse.model_validate(test_run)
         if test_run.model:
             resp.model_name = test_run.model.name
+        # simulation_id is stored directly on the TestRun row (Postgres mapping)
+        resp.simulation_id = test_run.simulation_id
         return resp
     except HTTPException:
         raise
@@ -406,15 +410,90 @@ async def get_test_run_status(test_run_id: int, db: AsyncSession = Depends(get_a
         raise HTTPException(status_code=500, detail="Failed to get test run status")
 
 
+def _build_recorded_data_csv(
+    test_run: TestRun,
+    data_points: List[DataPoint],
+    output_data: Optional[Dict[str, Any]] = None,
+) -> str:
+    """Build a CSV string containing recorded DB data: metadata, results, output_data (structured keys), and data points.
+
+    Note: For directory-based simulations we also prefer the raw simOut_*.csv from the model's output directory.
+    This helper is a fallback when that file is not available.
+    """
+    out = io.StringIO()
+    writer = csv.writer(out)
+
+    # Header for unified export (source, key, value + data point columns)
+    writer.writerow([
+        "source", "key", "value", "variable_name", "data_category", "value_type",
+        "unit", "timestamp", "sequence_number", "quality_flag", "description"
+    ])
+
+    # Metadata rows
+    meta = {
+        "id": test_run.id,
+        "name": test_run.name,
+        "model_id": test_run.model_id,
+        "status": test_run.status,
+        "start_time": str(test_run.start_time) if test_run.start_time else None,
+        "end_time": str(test_run.end_time) if test_run.end_time else None,
+        "execution_time": test_run.execution_time,
+        "error_message": test_run.error_message,
+        "created_at": str(test_run.created_at) if test_run.created_at else None,
+    }
+    for k, v in meta.items():
+        writer.writerow(["metadata", k, v if v is None else str(v), "", "", "", "", "", "", "", ""])
+
+    # Results rows (flatten key-value)
+    if test_run.results and isinstance(test_run.results, dict):
+        for k, v in test_run.results.items():
+            val = json.dumps(v) if isinstance(v, (dict, list)) else str(v)
+            writer.writerow(["results", k, val, "", "", "", "", "", "", "", ""])
+
+    # Output data rows (excluding verbose console text)
+    if output_data and isinstance(output_data, dict):
+        for k, v in output_data.items():
+            # Skip raw console text, which is already in console_output.txt
+            if k == "output":
+                continue
+            val = json.dumps(v, default=str) if isinstance(v, (dict, list)) else str(v)
+            writer.writerow(["output_data", k, val, "", "", "", "", "", "", "", ""])
+
+    # Data points rows
+    for dp in data_points:
+        value_str = json.dumps(dp.value) if dp.value is not None else ""
+        writer.writerow([
+            "data_point",
+            str(dp.id),
+            value_str,
+            dp.variable_name or "",
+            dp.data_category or "",
+            dp.value_type or "",
+            dp.unit or "",
+            str(dp.timestamp) if dp.timestamp else "",
+            str(dp.sequence_number) if dp.sequence_number is not None else "",
+            dp.quality_flag or "",
+            (dp.description or "")[:500] if dp.description else "",
+        ])
+
+    return out.getvalue()
+
+
 @router.get("/{test_run_id}/download", response_class=StreamingResponse)
 async def download_test_run_results(
     test_run_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user=Depends(get_current_user),
 ):
-    """Download test run results as a ZIP file (results, output, metadata)"""
+    """Download test run results as a ZIP file (results, output, metadata, recorded_data.csv)"""
     try:
-        result = await db.execute(select(TestRun).where(TestRun.id == test_run_id))
+        from sqlalchemy.orm import selectinload
+
+        result = await db.execute(
+            select(TestRun)
+            .options(selectinload(TestRun.data_points))
+            .where(TestRun.id == test_run_id)
+        )
         test_run = result.scalar_one_or_none()
 
         if not test_run:
@@ -422,6 +501,8 @@ async def download_test_run_results(
 
         if not (current_user.is_superuser or test_run.user_id == current_user.id):
             raise HTTPException(status_code=403, detail="Not authorized to download this test run")
+
+        data_points = list(test_run.data_points) if test_run.data_points else []
 
         buffer = io.BytesIO()
         with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -435,6 +516,7 @@ async def download_test_run_results(
                 "end_time": str(test_run.end_time) if test_run.end_time else None,
                 "execution_time": test_run.execution_time,
                 "error_message": test_run.error_message,
+                "simulation_id": test_run.simulation_id,
             }
             zf.writestr("metadata.json", json.dumps(meta, indent=2))
 
@@ -442,31 +524,53 @@ async def download_test_run_results(
             if test_run.results is not None:
                 zf.writestr("results.json", json.dumps(test_run.results, indent=2))
 
+            # Full output_data from DB; include simulation_id from Postgres when set
+            output_data = dict(test_run.output_data or {})
+            if test_run.simulation_id:
+                output_data["simulation_id"] = test_run.simulation_id
+            if output_data:
+                zf.writestr("output_data.json", json.dumps(output_data, indent=2, default=str))
+
             # Console output (MATLAB/simulation logs)
-            output_data = test_run.output_data or {}
             console_output = output_data.get("output", "") if isinstance(output_data, dict) else ""
             if console_output:
                 zf.writestr("console_output.txt", console_output, zipfile.ZIP_DEFLATED)
 
-            # Output data summary (paths, structure - without huge output text)
-            output_meta = {k: v for k, v in (output_data or {}).items() if k != "output"}
-            if output_meta:
-                zf.writestr("output_info.json", json.dumps(output_meta, indent=2))
-
-            # Add .mat and .json files from simulation output directory
+            # Prefer raw simOut_*.csv from the simulation output directory as recorded_data.csv
+            recorded_from_output = False
             output_dir = None
             if isinstance(output_data, dict):
                 output_dir = output_data.get("output_directory")
             if output_dir and os.path.isdir(output_dir):
                 for fname in sorted(os.listdir(output_dir)):
-                    if fname.endswith((".mat", ".json")):
-                        fpath = os.path.join(output_dir, fname)
-                        if os.path.isfile(fpath):
-                            try:
-                                arcname = f"simulation_output/{fname}"
-                                zf.write(fpath, arcname=arcname)
-                            except Exception as e:
-                                logger.warning("Could not add file to ZIP", path=fpath, error=str(e))
+                    fpath = os.path.join(output_dir, fname)
+                    if not os.path.isfile(fpath):
+                        continue
+
+                    lower_name = fname.lower()
+
+                    # Use first simOut_*.csv (or any .csv) as the primary recorded data export
+                    if not recorded_from_output and lower_name.endswith(".csv"):
+                        try:
+                            with open(fpath, "rb") as f:
+                                csv_bytes = f.read()
+                            zf.writestr("recorded_data.csv", csv_bytes, zipfile.ZIP_DEFLATED)
+                            recorded_from_output = True
+                        except Exception as e:
+                            logger.warning("Could not add recorded CSV to ZIP", path=fpath, error=str(e))
+
+                    # Always include raw simulation artifacts under simulation_output/
+                    if lower_name.endswith((".mat", ".json", ".csv")):
+                        try:
+                            arcname = f"simulation_output/{fname}"
+                            zf.write(fpath, arcname=arcname)
+                        except Exception as e:
+                            logger.warning("Could not add file to ZIP", path=fpath, error=str(e))
+
+            # Fallback: build a CSV from DB data when no simOut CSV was found
+            if not recorded_from_output:
+                recorded_csv = _build_recorded_data_csv(test_run, data_points, output_data)
+                zf.writestr("recorded_data.csv", recorded_csv.encode("utf-8-sig"), zipfile.ZIP_DEFLATED)
 
         buffer.seek(0)
         return StreamingResponse(

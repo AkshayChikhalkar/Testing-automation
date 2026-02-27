@@ -48,6 +48,7 @@ class TestRunResponse(TestRunBase):
     execution_time: Optional[float] = None
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
+    simulation_id: Optional[str] = None  # From InfluxDB; mapping stored in Postgres
     output_data: Optional[Dict[str, Any]] = None
     error_message: Optional[str] = None
     results: Optional[Dict[str, Any]] = None

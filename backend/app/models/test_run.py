@@ -27,6 +27,8 @@ class TestRun(Base):
     execution_time = Column(Float)  # Execution time in seconds
     start_time = Column(DateTime(timezone=True))
     end_time = Column(DateTime(timezone=True))
+    # Cross-system ID from InfluxDB (YYYYMMDD_HHMMSS); mapping test_run_id <-> simulation_id in Postgres
+    simulation_id = Column(String(20), nullable=True, index=True)
     
     # Input/Output data
     input_data = Column(JSON)  # Input data used for execution

@@ -45,10 +45,10 @@ class Settings(BaseSettings):
     MODBUS_PORT: int = 502
     
     # Analytics
-    INFLUXDB_URL: str = "http://localhost:8086"
+    INFLUXDB_URL: str = "http://193.16.126.186:8086"
     INFLUXDB_TOKEN: Optional[str] = None
-    INFLUXDB_ORG: str = "matlab-automation"
-    INFLUXDB_BUCKET: str = "test-data"
+    INFLUXDB_ORG: str = "my-org"
+    INFLUXDB_BUCKET: str = "simulations"
     
     # Simulationsmodelle project path (for MATLAB CLI execution)
     # Path to the simulationsmodelle repo containing run_simulation.py

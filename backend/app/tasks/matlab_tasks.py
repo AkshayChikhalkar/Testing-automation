@@ -4,6 +4,7 @@ Celery tasks for MATLAB model execution
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 from celery import current_task
@@ -20,6 +21,7 @@ from app.models.test_run import TestRun
 from app.models.model import Model
 from app.services.matlab_service import MATLABService
 from app.services.simulation_runner_service import SimulationRunnerService
+from app.services.influxdb_service import get_simulation_ids_in_time_range
 
 logger = structlog.get_logger()
 
@@ -31,6 +33,24 @@ def _short_error(msg: str) -> str:
     """Extract concise error message (first line, max length)"""
     first = (msg.split("\n")[0] or msg).strip()
     return first[:ERROR_MSG_MAX_LEN] + ("..." if len(first) > ERROR_MSG_MAX_LEN else "")
+
+
+def _extract_simulation_id_from_output_dir(output_directory: Optional[str]) -> Optional[str]:
+    """Extract simulation_id (YYYYMMDD_HHMMSS) from first simOut_*.csv in output_directory.
+    This ID is used in InfluxDB/Grafana to filter time-series data in the 'simulations' bucket.
+    """
+    if not output_directory or not os.path.isdir(output_directory):
+        return None
+    try:
+        # Pattern: simOut_20260227_082647.csv or simOut_sweep_20260227_082647.csv
+        pattern = re.compile(r"simOut_(?:sweep_)?(\d{8}_\d{6})\.csv", re.IGNORECASE)
+        for name in sorted(os.listdir(output_directory)):
+            m = pattern.match(name)
+            if m:
+                return m.group(1)
+    except OSError:
+        pass
+    return None
 
 
 @celery_app.task(bind=True, name="execute_model")
@@ -209,11 +229,28 @@ def run_test_run_execution(test_run_id: int) -> None:
                                 params_file = path_str
                                 batch_mode = True
 
+                # Enable DB export by default so simulation_id and time-series go to InfluxDB
+                db_mode = True
+                db_type = "influxdb"
+                # Use env defaults consistent with /simulations endpoint
+                db_token = os.environ.get("INFLUXDB_TOKEN")
+                db_host = os.environ.get("INFLUXDB_HOST", "193.16.126.186")
+                db_port = int(os.environ.get("INFLUXDB_PORT", "8086"))
+                db_org = os.environ.get("INFLUXDB_ORG", "my-org")
+                db_bucket = os.environ.get("INFLUXDB_BUCKET", "simulations")
+
                 result = sim_runner.run_simulation(
                     project_directory=model.model_directory,
                     params_file=params_file,
                     params_json=params_json,
                     batch_mode=batch_mode,
+                    db_mode=db_mode,
+                    db_type=db_type,
+                    db_host=db_host,
+                    db_port=db_port,
+                    db_token=db_token,
+                    db_org=db_org,
+                    db_bucket=db_bucket,
                     startup_script=model.startup_script,
                 )
                 test_run.end_time = datetime.now(timezone.utc)
@@ -226,15 +263,47 @@ def run_test_run_execution(test_run_id: int) -> None:
                         test_run.execution_time = delta.total_seconds()
                     except (TypeError, ValueError):
                         pass
+                output_dir = result.get("output_directory")
+                output_data = {
+                    "output": result.get("output", ""),
+                    "output_directory": output_dir,
+                }
+                # Resolve simulation_id from InfluxDB only (mapping stored in Postgres test_runs.simulation_id)
+                simulation_id = None
+                if test_run.start_time or test_run.end_time:
+                    start = test_run.start_time or test_run.end_time
+                    end = test_run.end_time or test_run.start_time
+                    if start:
+                        ids = get_simulation_ids_in_time_range(start, end)
+                        if len(ids) == 1:
+                            simulation_id = ids[0]
+                        elif len(ids) > 1 and test_run.start_time:
+                            def _parse_sid(s: str):
+                                try:
+                                    return datetime.strptime(s, "%Y%m%d_%H%M%S")
+                                except ValueError:
+                                    return None
+                            start_naive = test_run.start_time.replace(tzinfo=None) if test_run.start_time.tzinfo else test_run.start_time
+                            best, best_delta = None, None
+                            for s in ids:
+                                t = _parse_sid(s)
+                                if t is None:
+                                    continue
+                                delta = abs((t - start_naive).total_seconds())
+                                if best_delta is None or delta < best_delta:
+                                    best_delta, best = delta, s
+                            simulation_id = best
+                        elif ids:
+                            simulation_id = ids[0]
+                if simulation_id:
+                    test_run.simulation_id = simulation_id
+
                 if result.get("success"):
                     print(f"[TEST RUN] Simulation completed successfully for test_run_id={test_run_id} (exit code: {result.get('return_code', '?')})", flush=True)
                     test_run.status = "completed"
-                    test_run.output_data = {
-                        "output": result.get("output", ""),
-                        "output_directory": result.get("output_directory"),
-                    }
+                    test_run.output_data = output_data
                     test_run.error_message = None
-                    logger.info("Simulation completed", test_run_id=test_run_id)
+                    logger.info("Simulation completed", test_run_id=test_run_id, simulation_id=simulation_id)
                 else:
                     rc = result.get("return_code", "?")
                     err = result.get("error", "Simulation failed")
@@ -242,10 +311,7 @@ def run_test_run_execution(test_run_id: int) -> None:
                     test_run.status = "failed"
                     test_run.error_message = _short_error(err)
                     # Still store output and output_dir for debugging even when failed
-                    test_run.output_data = {
-                        "output": result.get("output", ""),
-                        "output_directory": result.get("output_directory"),
-                    }
+                    test_run.output_data = output_data
                     logger.error(
                         "Simulation failed",
                         test_run_id=test_run_id,
