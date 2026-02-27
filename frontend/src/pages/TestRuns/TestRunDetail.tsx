@@ -281,6 +281,29 @@ const TestRunDetail: React.FC = () => {
               <List dense>
                 <ListItem>
                   <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary="Simulation ID" 
+                    secondary={testRun.simulation_id ?? "Not available yet"}
+                    secondaryTypographyProps={{ 
+                      component: 'span', 
+                      sx: { fontFamily: testRun.simulation_id ? 'monospace' : 'inherit' }
+                    }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
+                    <InfoIcon />
+                  </ListItemIcon>
+                  <ListItemText 
+                    primary="Test Run ID" 
+                    secondary={testRun.id}
+                    secondaryTypographyProps={{ component: 'span' }}
+                  />
+                </ListItem>
+                <ListItem>
+                  <ListItemIcon>
                     <AssessmentIcon />
                   </ListItemIcon>
                   <ListItemText 
@@ -318,6 +341,19 @@ const TestRunDetail: React.FC = () => {
                   />
                 </ListItem>
               </List>
+              <Alert severity="info" sx={{ mt: 2 }} icon={<InfoIcon />}>
+                <Typography variant="subtitle2" gutterBottom>
+                  IDs and how data is filtered
+                </Typography>
+                {testRun.simulation_id && (
+                  <Typography variant="body2" color="text.secondary" component="span">
+                    <strong>Simulation ID ({testRun.simulation_id})</strong> — From InfluxDB. Use it in Grafana (<code>simulation_id</code> filter) and when sharing results. Mapping stored in Postgres.
+                  </Typography>
+                )}
+                <Typography variant="body2" color="text.secondary" sx={{ display: 'block', mt: 1 }} component="span">
+                  <strong>Test Run ID ({testRun.id})</strong> — Internal ID in this app and database (<code>test_runs.id</code>, <code>test_run_id</code> in relations).
+                </Typography>
+              </Alert>
             </CardContent>
           </Card>
         </Grid>
@@ -332,14 +368,35 @@ const TestRunDetail: React.FC = () => {
               <Paper sx={{ p: 2, bgcolor: 'grey.50' }}>
                 <pre style={{ margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'monospace' }}>
                   {(() => {
-                    const params = testRun.configuration?.parameters ?? testRun.parameters;
-                    const config = testRun.configuration;
+                    const rawConfig = testRun.configuration;
+                    const params = rawConfig?.parameters ?? testRun.parameters;
+
+                    // 1) Explicit parameters object with keys
                     if (params != null && typeof params === 'object' && Object.keys(params).length > 0) {
                       return JSON.stringify(params, null, 2);
                     }
-                    if (config != null && typeof config === 'object' && Object.keys(config).length > 0) {
-                      return JSON.stringify(config, null, 2);
+
+                    // 2) Configuration object with more than just an empty parameters object
+                    if (rawConfig != null && typeof rawConfig === 'object') {
+                      const { parameters, ...rest } = rawConfig as any;
+                      const hasNonEmptyParams =
+                        parameters && typeof parameters === 'object' && Object.keys(parameters).length > 0;
+                      const hasOtherConfigKeys = Object.keys(rest).length > 0;
+
+                      if (hasNonEmptyParams) {
+                        return JSON.stringify(parameters, null, 2);
+                      }
+                      if (hasOtherConfigKeys) {
+                        return JSON.stringify(rest, null, 2);
+                      }
                     }
+
+                    // 3) Fallback to input_data to at least show which file/format was used
+                    if (testRun.input_data && typeof testRun.input_data === 'object' && Object.keys(testRun.input_data).length > 0) {
+                      return JSON.stringify(testRun.input_data, null, 2);
+                    }
+
+                    // 4) Nothing meaningful available
                     return 'No parameters specified';
                   })()}
                 </pre>
