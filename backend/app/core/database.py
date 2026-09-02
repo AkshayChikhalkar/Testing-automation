@@ -15,7 +15,7 @@ logger = structlog.get_logger()
 # Create async engine
 async_engine = create_async_engine(
     settings.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://"),
-    echo=settings.DEBUG,
+    echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
 )
@@ -30,7 +30,7 @@ AsyncSessionLocal = async_sessionmaker(
 # Create sync engine for migrations
 sync_engine = create_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,
     pool_pre_ping=True,
     pool_recycle=300,
 )

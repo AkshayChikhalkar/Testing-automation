@@ -306,6 +306,8 @@ const Dashboard: React.FC = () => {
                                 color={
                                   testRun.status === 'completed'
                                     ? 'success'
+                                    : testRun.status === 'completed_warning'
+                                    ? 'warning'
                                     : testRun.status === 'failed'
                                     ? 'error'
                                     : 'default'

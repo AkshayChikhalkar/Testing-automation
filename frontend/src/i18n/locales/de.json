@@ -43,6 +43,7 @@
     "viewDetails": "Details anzeigen",
     "cancelled": "Abgebrochen",
     "completed": "Abgeschlossen",
+    "completed_warning": "Abgeschlossen mit Warnung",
     "failed": "Fehlgeschlagen",
     "pending": "Ausstehend",
     "running": "Läuft"

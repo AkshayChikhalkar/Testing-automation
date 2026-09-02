@@ -48,7 +48,7 @@ interface TestRun {
   name: string;
   model_id: number;
   model_name: string;
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
+  status: 'pending' | 'running' | 'completed' | 'completed_warning' | 'failed' | 'cancelled';
   start_time: string;
   end_time?: string;
   execution_time?: number;
@@ -194,6 +194,7 @@ const TestRuns: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'success';
+      case 'completed_warning': return 'warning';
       case 'failed': return 'error';
       case 'running': return 'warning';
       case 'pending': return 'info';
@@ -261,7 +262,7 @@ const TestRuns: React.FC = () => {
                     <TableCell>
                       <Box>
                         <Chip
-                          label={testRun.status}
+                          label={t(`common.${testRun.status}`, { defaultValue: testRun.status })}
                           color={getStatusColor(testRun.status) as any}
                           size="small"
                         />
@@ -270,7 +271,7 @@ const TestRuns: React.FC = () => {
                             <Typography
                               variant="caption"
                               display="block"
-                              color="error.main"
+                              color={testRun.status === 'completed_warning' ? 'warning.main' : 'error.main'}
                               sx={{ mt: 0.5, lineHeight: 1.2 }}
                             >
                               {getShortErrorMessage(testRun.error_message)}
@@ -293,7 +294,7 @@ const TestRuns: React.FC = () => {
                         </Box>
                       ) : (
                         <Typography variant="body2" color="text.secondary">
-                          {testRun.status === 'completed' ? '100%' : 'N/A'}
+                          {testRun.status === 'completed' || testRun.status === 'completed_warning' ? '100%' : 'N/A'}
                         </Typography>
                       )}
                     </TableCell>
@@ -335,7 +336,7 @@ const TestRuns: React.FC = () => {
                             <ViewIcon />
                           </IconButton>
                         </Tooltip>
-                        {testRun.status === 'completed' && (
+                        {(testRun.status === 'completed' || testRun.status === 'completed_warning') && (
                           <Tooltip title={t('testRuns.downloadResults')}>
                             <IconButton
                               size="small"

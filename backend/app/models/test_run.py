@@ -23,7 +23,7 @@ class TestRun(Base):
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     
     # Execution details
-    status = Column(String(20), default="pending")  # pending, running, completed, failed, cancelled
+    status = Column(String(20), default="pending")  # pending, running, completed, completed_warning, failed, cancelled
     execution_time = Column(Float)  # Execution time in seconds
     start_time = Column(DateTime(timezone=True))
     end_time = Column(DateTime(timezone=True))

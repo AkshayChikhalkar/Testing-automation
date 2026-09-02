@@ -6,6 +6,8 @@ Supports: project directory, params file (CSV/JSON), batch mode, db mode.
 """
 
 import os
+import json
+import re
 import subprocess
 import sys
 import threading
@@ -16,6 +18,69 @@ import structlog
 from app.core.config import settings
 
 logger = structlog.get_logger()
+
+
+def _extract_simulation_error(output: str, return_code: int) -> str:
+    """Pick a useful MATLAB/Python error line from captured output."""
+    markers = (
+        "Unrecognized function or variable",
+        "Unable to resolve the name",
+        "[ERROR]",
+        "ERROR: MATLAB",
+        "Error in runBatchSimulations",
+        "Error in temp_batch_simulation",
+        "Error in batch processing",
+        "Error running MATLAB",
+        "Simulation failed",
+        "Neither STAB1 nor STAB",
+        "No parameter roots from run_config",
+        "Cannot resolve parameter path",
+    )
+    for line in (output or "").splitlines():
+        stripped = line.strip()
+        if any(marker in stripped for marker in markers):
+            return stripped[:500]
+    return f"Simulation exited with code {return_code}"
+
+
+def _extract_db_export_warning(output: str) -> Optional[str]:
+    """If CSV/sim succeeded but InfluxDB export failed, return a short warning."""
+    match = re.search(
+        r"Database export complete! \((\d+) successful, (\d+) failed\)",
+        output or "",
+    )
+    if match and int(match.group(2)) > 0:
+        return match.group(0)
+    for line in (output or "").splitlines():
+        stripped = line.strip()
+        if "Database export failed" in stripped or "Database write failed" in stripped:
+            return stripped[:500]
+    return None
+
+
+def find_project_root(project_dir: Path) -> Path:
+    """Prefer a directory that contains run_config.json or run_simulation.py."""
+    project_dir = Path(project_dir).resolve()
+    for candidate in (project_dir, project_dir.parent):
+        if (candidate / "run_config.json").exists() or (candidate / "run_simulation.py").exists():
+            return candidate
+    return project_dir
+
+
+def load_run_config(project_dir: Path) -> Dict[str, Any]:
+    """Load optional per-model run_config.json."""
+    root = find_project_root(project_dir)
+    path = root / "run_config.json"
+    if not path.exists():
+        return {}
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f) or {}
+        logger.info("Loaded run_config.json", path=str(path))
+        return data
+    except (OSError, json.JSONDecodeError) as exc:
+        logger.warning("Could not read run_config.json", path=str(path), error=str(exc))
+        return {}
 
 
 class SimulationRunnerService:
@@ -105,14 +170,15 @@ class SimulationRunnerService:
         # Build command
         cmd = [sys.executable, str(run_script)]
 
-        # Startup script for MODEL_SingleStab_ECU
-        model_dir = project_dir / "MODEL_SingleStab_ECU"
-        startup_path = model_dir / "startup_MDL.m"
+        cfg = load_run_config(project_dir)
+        project_root = find_project_root(project_dir)
+        startup_rel = cfg.get("startup_script") or "MODEL_SingleStab_ECU/startup_MDL.m"
         if startup_script:
             startup_path = Path(startup_script)
-        elif not model_dir.exists():
-            model_dir = project_dir
-            startup_path = model_dir / "startup_MDL.m"
+        else:
+            startup_path = project_root / startup_rel
+            if not startup_path.exists():
+                startup_path = project_dir / startup_rel
 
         if startup_path.exists():
             cmd.extend(["--startup-script", str(startup_path)])
@@ -134,7 +200,6 @@ class SimulationRunnerService:
         elif params_json:
             # Write temp JSON and pass
             import tempfile
-            import json
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(params_json, f)
                 temp_path = f.name
@@ -182,25 +247,44 @@ class SimulationRunnerService:
         db_bucket: Optional[str],
     ) -> Dict[str, Any]:
         """Execute run_simulation.py subprocess"""
+        influx = settings.influx_connection()
+        token = db_token or influx.get("token") or os.environ.get("INFLUXDB_TOKEN")
+        host = db_host or influx.get("host")
+        port = db_port if db_port is not None else influx.get("port")
+        org = db_org or influx.get("org")
+        bucket = db_bucket or influx.get("bucket")
+
         if db_mode:
-            cmd.extend(["--db-type", db_type])
-            if db_host:
-                cmd.extend(["--db-host", db_host])
-            if db_port is not None:
-                cmd.extend(["--db-port", str(db_port)])
-            if db_token:
-                cmd.extend(["--db-token", db_token])
-            elif os.environ.get("INFLUXDB_TOKEN"):
-                cmd.extend(["--db-token", os.environ["INFLUXDB_TOKEN"]])
-            if db_org:
-                cmd.extend(["--db-org", db_org])
-            if db_bucket:
-                cmd.extend(["--db-bucket", db_bucket])
+            if not token:
+                logger.warning("INFLUXDB_TOKEN not set; skipping database export")
+                print("[SIM] INFLUXDB_TOKEN not set; skipping database export (CSV only)\n", flush=True)
+            else:
+                cmd.extend(["--db-type", db_type])
+                if host:
+                    cmd.extend(["--db-host", str(host)])
+                if port is not None:
+                    cmd.extend(["--db-port", str(port)])
+                if org:
+                    cmd.extend(["--db-org", str(org)])
+                if bucket:
+                    cmd.extend(["--db-bucket", str(bucket)])
 
         try:
             logger.info("Running simulation", cmd=cmd, cwd=str(cwd))
             env = {**os.environ, "PYTHONPATH": str(self.simulations_path or "")}
             env["PYTHONUNBUFFERED"] = "1"  # Force unbuffered output from child on Windows
+            env["PYTHONIOENCODING"] = "utf-8"
+            env["PYTHONUTF8"] = "1"
+            if token:
+                env["INFLUXDB_TOKEN"] = str(token)
+            if host:
+                env["INFLUXDB_HOST"] = str(host)
+            if port is not None:
+                env["INFLUXDB_PORT"] = str(port)
+            if org:
+                env["INFLUXDB_ORG"] = str(org)
+            if bucket:
+                env["INFLUXDB_BUCKET"] = str(bucket)
             print(f"[SIM] Running: {' '.join(cmd)}\n", flush=True)
 
             # Capture output while also streaming to terminal
@@ -213,8 +297,12 @@ class SimulationRunnerService:
                         with output_lock:
                             dest.append(line)
                         if out_sys:
-                            out_sys.write(line)
-                            out_sys.flush()
+                            try:
+                                out_sys.write(line)
+                                out_sys.flush()
+                            except UnicodeEncodeError:
+                                out_sys.write(line.encode("ascii", errors="replace").decode("ascii"))
+                                out_sys.flush()
                 except Exception:
                     pass
                 finally:
@@ -229,6 +317,8 @@ class SimulationRunnerService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 bufsize=1,
                 env=env,
             )
@@ -242,14 +332,15 @@ class SimulationRunnerService:
             reader.join(timeout=2)
             captured_output = "".join(output_lines)
 
-            # MATLAB/run_simulation.py may exit 1 with warnings despite successful completion
-            success = return_code in (0, 1)
+            success = return_code == 0
+            error = None if success else _extract_simulation_error(captured_output, return_code)
             result = {
                 "success": success,
                 "output": captured_output,
-                "error": None if success else f"Simulation exited with code {return_code}",
+                "error": error,
                 "return_code": return_code,
                 "output_directory": str(output_dir),
+                "db_export_warning": _extract_db_export_warning(captured_output) if success else None,
             }
             return result
         except subprocess.TimeoutExpired as te:

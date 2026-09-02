@@ -132,8 +132,8 @@ export const apiService = {
       const testRunsToday = testRuns.filter((tr: any) => 
         tr.created_at?.startsWith(today)
       ).length;
-      const successfulTests = testRuns.filter((tr: any) => 
-        tr.status === 'completed'
+      const successfulTests = testRuns.filter((tr: any) =>
+        tr.status === 'completed' || tr.status === 'completed_warning'
       ).length;
       const failedTests = testRuns.filter((tr: any) => 
         tr.status === 'failed'

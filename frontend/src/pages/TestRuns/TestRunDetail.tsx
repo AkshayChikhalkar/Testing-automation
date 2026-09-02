@@ -28,6 +28,7 @@ import {
   CheckCircle as CheckCircleIcon,
   Error as ErrorIcon,
   Info as InfoIcon,
+  Warning as WarningIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -139,6 +140,7 @@ const TestRunDetail: React.FC = () => {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'completed': return 'success';
+      case 'completed_warning': return 'warning';
       case 'failed': return 'error';
       case 'running': return 'warning';
       case 'pending': return 'info';
@@ -150,6 +152,7 @@ const TestRunDetail: React.FC = () => {
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'completed': return <CheckCircleIcon />;
+      case 'completed_warning': return <WarningIcon />;
       case 'failed': return <ErrorIcon />;
       case 'running': return <PlayIcon />;
       case 'pending': return <ScheduleIcon />;
@@ -220,7 +223,7 @@ const TestRunDetail: React.FC = () => {
               Stop Test
             </Button>
           )}
-          {testRun.status === 'completed' && (
+          {(testRun.status === 'completed' || testRun.status === 'completed_warning') && (
             <Button
               variant="contained"
               startIcon={<DownloadIcon />}
@@ -243,7 +246,7 @@ const TestRunDetail: React.FC = () => {
               <Box display="flex" alignItems="center" gap={2} mb={2}>
                 <Chip
                   icon={getStatusIcon(testRun.status)}
-                  label={testRun.status.toUpperCase()}
+                  label={testRun.status.replace(/_/g, ' ').toUpperCase()}
                   color={getStatusColor(testRun.status) as any}
                   size="medium"
                 />
@@ -263,7 +266,7 @@ const TestRunDetail: React.FC = () => {
               )}
 
               {testRun.error_message && (
-                <Alert severity="error" sx={{ mt: 2 }}>
+                <Alert severity={testRun.status === 'completed_warning' ? 'warning' : 'error'} sx={{ mt: 2 }}>
                   {testRun.error_message}
                 </Alert>
               )}

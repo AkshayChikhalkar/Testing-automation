@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     # Analytics
     INFLUXDB_URL: str = "http://193.16.126.186:8086"
     INFLUXDB_TOKEN: Optional[str] = None
+    INFLUXDB_HOST: Optional[str] = None
+    INFLUXDB_PORT: Optional[int] = None
     INFLUXDB_ORG: str = "my-org"
     INFLUXDB_BUCKET: str = "simulations"
     
@@ -85,6 +87,20 @@ class Settings(BaseSettings):
     @property
     def ALLOWED_EXTENSIONS_LIST(self) -> List[str]:
         return [i.strip() for i in self.ALLOWED_EXTENSIONS.split(",")]
+
+    def influx_connection(self) -> dict:
+        """Host/org/bucket/token for InfluxDB. Token comes only from settings/.env."""
+        from urllib.parse import urlparse
+        parsed = urlparse(self.INFLUXDB_URL or "")
+        host = self.INFLUXDB_HOST or parsed.hostname or "193.16.126.186"
+        port = self.INFLUXDB_PORT or parsed.port or 8086
+        return {
+            "token": self.INFLUXDB_TOKEN,
+            "host": host,
+            "port": int(port),
+            "org": self.INFLUXDB_ORG,
+            "bucket": self.INFLUXDB_BUCKET,
+        }
     
     model_config = {
         "env_file": ".env",

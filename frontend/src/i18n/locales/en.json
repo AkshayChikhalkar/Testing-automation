@@ -43,6 +43,7 @@
     "viewDetails": "View Details",
     "cancelled": "Cancelled",
     "completed": "Completed",
+    "completed_warning": "Completed with warning",
     "failed": "Failed",
     "pending": "Pending",
     "running": "Running"

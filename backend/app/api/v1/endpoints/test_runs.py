@@ -368,7 +368,7 @@ async def generate_test_report(test_run_id: int, db: AsyncSession = Depends(get_
         if not test_run:
             raise HTTPException(status_code=404, detail="Test run not found")
         
-        if test_run.status != "completed":
+        if test_run.status not in ("completed", "completed_warning"):
             raise HTTPException(status_code=400, detail="Test report can only be generated for completed test runs")
         
         # TODO: Implement report generation

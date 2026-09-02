@@ -12,6 +12,7 @@ import os
 import tempfile
 import structlog
 
+from app.core.config import settings
 from app.core.security import get_current_user
 from app.services.simulation_runner_service import SimulationRunnerService
 
@@ -144,17 +145,17 @@ def _run_with_service(
     if param_overrides:
         overrides_list = [p.strip() for p in param_overrides.split(",") if p.strip()]
 
-    # Use env defaults for DB if not provided
+    influx = settings.influx_connection()
     if db_mode and not db_token:
-        db_token = os.environ.get("INFLUXDB_TOKEN")
+        db_token = influx.get("token")
     if db_host is None:
-        db_host = os.environ.get("INFLUXDB_HOST", "193.16.126.186")
+        db_host = influx.get("host")
     if db_port is None:
-        db_port = int(os.environ.get("INFLUXDB_PORT", "8086"))
+        db_port = influx.get("port")
     if db_org is None:
-        db_org = os.environ.get("INFLUXDB_ORG", "my-org")
+        db_org = influx.get("org")
     if db_bucket is None:
-        db_bucket = os.environ.get("INFLUXDB_BUCKET", "simulations")
+        db_bucket = influx.get("bucket")
 
     result = service.run_simulation(
         project_directory=project_directory,

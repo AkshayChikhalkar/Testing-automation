@@ -16,6 +16,7 @@ import asyncio
 import structlog
 
 from app.core.celery import celery_app
+from app.core.config import settings
 from app.core.database import AsyncSessionLocal, SessionLocal
 from app.models.test_run import TestRun
 from app.models.model import Model
@@ -33,6 +34,28 @@ def _short_error(msg: str) -> str:
     """Extract concise error message (first line, max length)"""
     first = (msg.split("\n")[0] or msg).strip()
     return first[:ERROR_MSG_MAX_LEN] + ("..." if len(first) > ERROR_MSG_MAX_LEN else "")
+
+
+def _error_from_result(result: Dict[str, Any]) -> str:
+    """Prefer a MATLAB error line from captured output over a generic exit-code message."""
+    err = result.get("error") or "Simulation failed"
+    output = result.get("output") or ""
+    markers = (
+        "Unrecognized function or variable",
+        "Unable to resolve the name",
+        "[ERROR]",
+        "ERROR: MATLAB",
+        "Error running MATLAB",
+        "Error in runBatchSimulations",
+        "Error in batch processing",
+        "Neither STAB1 nor STAB",
+        "Invalid parameter path",
+    )
+    for line in output.splitlines():
+        stripped = line.strip()
+        if any(marker in stripped for marker in markers):
+            return stripped
+    return err
 
 
 def _extract_simulation_id_from_output_dir(output_directory: Optional[str]) -> Optional[str]:
@@ -229,15 +252,17 @@ def run_test_run_execution(test_run_id: int) -> None:
                                 params_file = path_str
                                 batch_mode = True
 
-                # Enable DB export by default so simulation_id and time-series go to InfluxDB
-                db_mode = True
+                # Enable DB export when a token is configured (backend .env / settings only)
+                influx = settings.influx_connection()
+                db_token = influx.get("token")
+                db_mode = bool(db_token)
                 db_type = "influxdb"
-                # Use env defaults consistent with /simulations endpoint
-                db_token = os.environ.get("INFLUXDB_TOKEN")
-                db_host = os.environ.get("INFLUXDB_HOST", "193.16.126.186")
-                db_port = int(os.environ.get("INFLUXDB_PORT", "8086"))
-                db_org = os.environ.get("INFLUXDB_ORG", "my-org")
-                db_bucket = os.environ.get("INFLUXDB_BUCKET", "simulations")
+                db_host = influx.get("host")
+                db_port = influx.get("port")
+                db_org = influx.get("org")
+                db_bucket = influx.get("bucket")
+                if not db_mode:
+                    logger.warning("INFLUXDB_TOKEN not set; skipping InfluxDB export", test_run_id=test_run_id)
 
                 result = sim_runner.run_simulation(
                     project_directory=model.model_directory,
@@ -299,14 +324,29 @@ def run_test_run_execution(test_run_id: int) -> None:
                     test_run.simulation_id = simulation_id
 
                 if result.get("success"):
-                    print(f"[TEST RUN] Simulation completed successfully for test_run_id={test_run_id} (exit code: {result.get('return_code', '?')})", flush=True)
-                    test_run.status = "completed"
+                    db_warning = result.get("db_export_warning")
                     test_run.output_data = output_data
-                    test_run.error_message = None
-                    logger.info("Simulation completed", test_run_id=test_run_id, simulation_id=simulation_id)
+                    if db_warning:
+                        print(
+                            f"[TEST RUN] Simulation completed with warning for test_run_id={test_run_id}: {db_warning}",
+                            flush=True,
+                        )
+                        test_run.status = "completed_warning"
+                        test_run.error_message = _short_error(db_warning)
+                        logger.warning(
+                            "Simulation completed with InfluxDB export warning",
+                            test_run_id=test_run_id,
+                            simulation_id=simulation_id,
+                            warning=db_warning,
+                        )
+                    else:
+                        print(f"[TEST RUN] Simulation completed successfully for test_run_id={test_run_id} (exit code: {result.get('return_code', '?')})", flush=True)
+                        test_run.status = "completed"
+                        test_run.error_message = None
+                        logger.info("Simulation completed", test_run_id=test_run_id, simulation_id=simulation_id)
                 else:
                     rc = result.get("return_code", "?")
-                    err = result.get("error", "Simulation failed")
+                    err = _error_from_result(result)
                     print(f"[TEST RUN] Simulation failed for test_run_id={test_run_id}: {err} (exit code: {rc})", flush=True)
                     test_run.status = "failed"
                     test_run.error_message = _short_error(err)

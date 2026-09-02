@@ -43,6 +43,7 @@
     "viewDetails": "查看详情",
     "cancelled": "已取消",
     "completed": "已完成",
+    "completed_warning": "已完成（有警告）",
     "failed": "失败",
     "pending": "待处理",
     "running": "运行中"
