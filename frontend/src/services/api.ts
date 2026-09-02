@@ -69,6 +69,8 @@ export const apiService = {
     upload: (formData: FormData) => apiClient.post('/models/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
+    validateDirectory: (directoryPath: string) =>
+      apiClient.post('/models/validate-directory', { directory_path: directoryPath }),
     uploadDirectory: (formData: FormData) => apiClient.post('/models/upload-directory', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),

@@ -14,7 +14,15 @@ from app.core.security import get_current_user
 from app.core.config import settings
 from app.models.model import Model
 from app.services.matlab_service import MATLABService
-from app.schemas.model import ModelCreate, ModelUpdate, ModelResponse, ModelListResponse, DirectoryModelCreate
+from app.services.model_project import inspect_model_project
+from app.schemas.model import (
+    ModelCreate,
+    ModelUpdate,
+    ModelResponse,
+    ModelListResponse,
+    DirectoryModelCreate,
+    DirectoryValidateRequest,
+)
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -54,6 +62,15 @@ async def list_models(
     except Exception as e:
         logger.error("Failed to list models", error=str(e))
         raise HTTPException(status_code=500, detail="Failed to list models")
+
+
+@router.post("/validate-directory")
+async def validate_model_directory(
+    body: DirectoryValidateRequest,
+    current_user=Depends(get_current_user),
+):
+    """Check that a path is a MATLAB project by layout (runner + startup), not folder name."""
+    return inspect_model_project(body.directory_path)
 
 
 @router.get("/{model_id}", response_model=ModelResponse)
@@ -254,73 +271,38 @@ async def upload_model_directory(
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(get_current_user),
 ):
-    """Upload a model directory (like simulationsmodelle-main)"""
+    """Register a MATLAB model project directory (any name; layout is validated)."""
     try:
-        # Validate directory exists
-        if not os.path.exists(directory_path):
-            raise HTTPException(status_code=400, detail="Directory does not exist")
-        
-        if not os.path.isdir(directory_path):
-            raise HTTPException(status_code=400, detail="Path is not a directory")
-        
-        # Look for startup scripts in priority order
-        startup_scripts = []
-        
-        # Priority 1: Look for startup*.m files in MODEL_* directories
-        for root, dirs, files in os.walk(directory_path):
-            if any('MODEL_' in d for d in root.split(os.sep)):
-                for file in files:
-                    if file.endswith('.m') and file.lower().startswith('startup'):
-                        startup_scripts.append(os.path.join(root, file))
-        
-        # Priority 2: Look for any startup*.m files anywhere
-        if not startup_scripts:
-            for root, dirs, files in os.walk(directory_path):
-                for file in files:
-                    if file.endswith('.m') and file.lower().startswith('startup'):
-                        startup_scripts.append(os.path.join(root, file))
-        
-        # Priority 3: Look for init*.m files in MODEL_* directories
-        if not startup_scripts:
-            for root, dirs, files in os.walk(directory_path):
-                if any('MODEL_' in d for d in root.split(os.sep)):
-                    for file in files:
-                        if file.endswith('.m') and file.lower().startswith('init'):
-                            startup_scripts.append(os.path.join(root, file))
-        
-        # Priority 4: Any .m files in MODEL_* directories
-        if not startup_scripts:
-            for root, dirs, files in os.walk(directory_path):
-                if any('MODEL_' in d for d in root.split(os.sep)):
-                    for file in files:
-                        if file.endswith('.m'):
-                            startup_scripts.append(os.path.join(root, file))
-        
-        # Use the first startup script found, or None
-        startup_script = startup_scripts[0] if startup_scripts else None
-        
+        layout = inspect_model_project(directory_path)
+        if not layout["valid"]:
+            raise HTTPException(
+                status_code=400,
+                detail="; ".join(layout["errors"]) or "Invalid model directory",
+            )
+
+        startup_script = layout.get("startup_script")
+
         # Parse optional complex fields
         parsed_tags = None
         if tags:
             try:
                 import json
                 parsed_tags = json.loads(tags) if tags.startswith('[') else [tag.strip() for tag in tags.split(',')]
-            except:
+            except Exception:
                 parsed_tags = [tag.strip() for tag in tags.split(',')]
-        
+
         parsed_parameters = None
         if parameters:
             try:
                 import json
                 parsed_parameters = json.loads(parameters)
-            except:
+            except Exception:
                 parsed_parameters = {}
-        
-        # Create model instance
+
         model = Model(
             name=name,
             description=description,
-            model_directory=directory_path,
+            model_directory=layout["root"] or directory_path,
             model_type="directory",
             startup_script=startup_script,
             version=version,
@@ -332,14 +314,14 @@ async def upload_model_directory(
             is_active=True,
             is_validated=False
         )
-        
+
         db.add(model)
         await db.commit()
         await db.refresh(model)
-        
-        logger.info("Directory model created", model_id=model.id, name=model.name, directory=directory_path)
+
+        logger.info("Directory model created", model_id=model.id, name=model.name, directory=layout["root"])
         return model
-        
+
     except HTTPException:
         raise
     except Exception as e:

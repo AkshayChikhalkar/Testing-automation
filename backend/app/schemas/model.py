@@ -91,6 +91,10 @@ class ModelInfo(BaseModel):
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
 
+class DirectoryValidateRequest(BaseModel):
+    directory_path: str = Field(..., min_length=1, max_length=500)
+
+
 class DirectoryModelCreate(BaseModel):
     """Schema for creating a directory-based model"""
     name: str = Field(..., min_length=1, max_length=100)

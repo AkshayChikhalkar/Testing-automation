@@ -19,6 +19,7 @@ import {
 } from '@mui/material';
 import { FolderOpen as FolderIcon, Upload as UploadIcon } from '@mui/icons-material';
 import { useTranslation } from 'react-i18next';
+import { apiService } from '../services/api';
 
 interface ModelDirectoryUploadProps {
   open: boolean;
@@ -58,6 +59,7 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
     parameters: editingModel?.parameters ? JSON.stringify(editingModel.parameters) : '{}',
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+  const [layoutHint, setLayoutHint] = useState('');
 
   const categories = [
     'Simulink Model',
@@ -77,8 +79,6 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
 
     if (!formData.directory_path.trim()) {
       newErrors.directory_path = 'Directory path is required';
-    } else if (!formData.directory_path.includes('simulationsmodelle')) {
-      newErrors.directory_path = 'Please select a valid simulationsmodelle directory';
     }
 
     if (formData.parameters && formData.parameters !== '{}') {
@@ -93,10 +93,32 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleSubmit = () => {
-    if (validateForm()) {
-      onSubmit(formData);
+  const handleSubmit = async () => {
+    if (!validateForm()) {
+      return;
     }
+    try {
+      const response = await apiService.models.validateDirectory(formData.directory_path.trim());
+      const layout = response.data as { valid?: boolean; errors?: string[]; startup_script?: string };
+      if (!layout.valid) {
+        setErrors({
+          ...errors,
+          directory_path: (layout.errors && layout.errors.length)
+            ? layout.errors.join(' ')
+            : 'This folder is not a valid MATLAB project',
+        });
+        setLayoutHint('');
+        return;
+      }
+      setLayoutHint(layout.startup_script ? `Detected startup: ${layout.startup_script}` : '');
+    } catch (error: any) {
+      setErrors({
+        ...errors,
+        directory_path: error?.response?.data?.detail || 'Could not check the directory on the server',
+      });
+      return;
+    }
+    onSubmit(formData);
   };
 
   const handleClose = () => {
@@ -117,7 +139,7 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
   const handleDirectorySelect = () => {
     // In a real implementation, this would open a directory picker
     // For now, we'll use a text input with a placeholder
-    const path = prompt('Enter the path to the simulationsmodelle-main directory:');
+    const path = prompt('Enter the path to the MATLAB model project root:');
     if (path) {
       setFormData({ ...formData, directory_path: path });
     }
@@ -138,7 +160,7 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
         <Alert severity="info" sx={{ mb: 3 }}>
           {editingModel 
             ? 'Edit the metadata for your MATLAB model directory. The directory path and startup script are automatically detected.'
-            : 'Upload a complete MATLAB model directory (like simulationsmodelle-main) with all dependencies. The system will automatically detect startup scripts and initialize the model properly.'
+            : 'Point this at a MATLAB project root. The folder name can be anything (for example Fahren). It must contain run_simulation.py and a startup_*.m script (or run_config.json that names that script).'
           }
         </Alert>
 
@@ -162,10 +184,17 @@ const ModelDirectoryUpload: React.FC<ModelDirectoryUploadProps> = ({
               <TextField
                 fullWidth
                 value={formData.directory_path}
-                onChange={(e) => setFormData({ ...formData, directory_path: e.target.value })}
+                onChange={(e) => {
+                  setLayoutHint('');
+                  setFormData({ ...formData, directory_path: e.target.value });
+                }}
                 error={!!errors.directory_path}
-                helperText={errors.directory_path || 'Path to the simulationsmodelle-main directory'}
-                placeholder="C:\path\to\simulationsmodelle-main"
+                helperText={
+                  errors.directory_path
+                  || layoutHint
+                  || 'Project root with run_simulation.py and startup_*.m (or run_config.json)'
+                }
+                placeholder="C:\path\to\Fahren"
                 disabled={!!editingModel} // Disable editing directory path for existing models
               />
               {!editingModel && (

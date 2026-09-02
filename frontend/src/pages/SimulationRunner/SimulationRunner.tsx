@@ -178,12 +178,12 @@ const SimulationRunner: React.FC = () => {
 
           <TextField
             fullWidth
-            label="Project Directory (simulationsmodelle root)"
+            label="Project Directory"
             value={projectDirectory}
             onChange={(e) => setProjectDirectory(e.target.value)}
-            placeholder="C:\Users\...\simulationsmodelle or /path/to/simulationsmodelle"
+            placeholder="C:\path\to\your-model-project"
             sx={{ mb: 2 }}
-            helperText="Path to the simulationsmodelle repo containing run_simulation.py and MODEL_SingleStab_ECU"
+            helperText="Project root with run_simulation.py and a startup_*.m script (folder name can be anything)"
           />
 
           <Box sx={{ mb: 2 }}>
