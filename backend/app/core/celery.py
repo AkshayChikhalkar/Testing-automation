@@ -26,8 +26,8 @@ celery_app.conf.update(
     timezone="UTC",
     enable_utc=True,
     task_track_started=True,
-    task_time_limit=30 * 60,  # 30 minutes
-    task_soft_time_limit=25 * 60,  # 25 minutes
+    task_time_limit=60 * 60,  # 1 hour (MATLAB batches can be long)
+    task_soft_time_limit=55 * 60,
     worker_prefetch_multiplier=1,
     worker_max_tasks_per_child=1000,
     result_expires=3600,  # 1 hour
@@ -40,6 +40,7 @@ celery_app.conf.update(
     task_annotations={
         "*": {"rate_limit": "10/s"},
         "app.tasks.matlab_tasks.execute_model": {"rate_limit": "5/s"},
+        "app.tasks.matlab_tasks.execute_test_run": {"rate_limit": "5/s"},
     }
 )
 

@@ -45,8 +45,7 @@ def get_simulation_ids_in_time_range(
         return []
 
     bucket = bucket or settings.INFLUXDB_BUCKET
-    if not end:
-        # Default: end = start + 1 hour so we don't query unbounded
+    if not end or end <= start:
         from datetime import timedelta
         end = start + timedelta(hours=1)
 

@@ -6,6 +6,8 @@ from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from fastapi import HTTPException
+from starlette.exceptions import HTTPException as StarletteHTTPException
 import structlog
 
 from app.core.config import settings
@@ -50,6 +52,12 @@ async def get_async_db():
     async with AsyncSessionLocal() as session:
         try:
             yield session
+        except StarletteHTTPException:
+            await session.rollback()
+            raise
+        except HTTPException:
+            await session.rollback()
+            raise
         except Exception as e:
             logger.error("Database session error", error=str(e))
             await session.rollback()
@@ -63,6 +71,12 @@ def get_sync_db():
     db = SessionLocal()
     try:
         yield db
+    except StarletteHTTPException:
+        db.rollback()
+        raise
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         logger.error("Database session error", error=str(e))
         db.rollback()

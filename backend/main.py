@@ -8,7 +8,9 @@ from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import JSONResponse
 import structlog
 import time
+import logging
 from contextlib import asynccontextmanager
+import asyncio
 
 from app.core.config import settings
 from app.core.database import init_db
@@ -40,6 +42,21 @@ structlog.configure(
 )
 
 logger = structlog.get_logger()
+
+
+class _QuietPollingAccessLog(logging.Filter):
+    """Drop uvicorn access lines for high-frequency polling GETs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        if "GET /api/v1/test-runs/" in msg and "200" in msg:
+            return False
+        if "GET /api/v1/auth/me" in msg and "200" in msg:
+            return False
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(_QuietPollingAccessLog())
 
 
 @asynccontextmanager
@@ -90,19 +107,35 @@ async def lifespan(app: FastAPI):
                 logger.info("Seeded dev user", username="akshay")
     except Exception as e:
         logger.error("Failed to seed default admin user", error=str(e))
-    
-    # Initialize MATLAB engine if available
+
     try:
-        from app.services.matlab_service import MATLABService
-        matlab_service = MATLABService()
-        await matlab_service.initialize()
-        logger.info("MATLAB engine initialized successfully")
+        from app.services.orphan_runs import fail_orphaned_runs
+        n = fail_orphaned_runs()
+        if n:
+            logger.warning("Failed orphaned test runs on startup", count=n)
     except Exception as e:
-        logger.warning("MATLAB engine initialization failed", error=str(e))
+        logger.warning("Orphaned-run sweep failed", error=str(e))
+
+    stop_sweeper = asyncio.Event()
+
+    async def _orphan_loop():
+        from app.services.orphan_runs import fail_orphaned_runs
+        while not stop_sweeper.is_set():
+            try:
+                await asyncio.to_thread(fail_orphaned_runs)
+            except Exception as e:
+                logger.warning("Periodic orphaned-run sweep failed", error=str(e))
+            try:
+                await asyncio.wait_for(stop_sweeper.wait(), timeout=60)
+            except asyncio.TimeoutError:
+                pass
+
+    sweeper_task = asyncio.create_task(_orphan_loop())
     
     yield
-    
-    # Shutdown
+
+    stop_sweeper.set()
+    sweeper_task.cancel()
     logger.info("Shutting down MATLAB Automation Platform")
 
 
@@ -136,27 +169,32 @@ app.add_middleware(
 async def log_requests(request: Request, call_next):
     """Log all HTTP requests"""
     start_time = time.time()
-    
-    # Log request
-    logger.info(
-        "Request started",
-        method=request.method,
-        url=str(request.url),
-        client_ip=request.client.host if request.client else None
+    path = request.url.path
+    is_poll = request.method == "GET" and (
+        path.endswith("/test-runs/")
+        or path.endswith("/auth/me")
+        or (path.endswith("/status") and "/test-runs/" in path)
     )
+    if not is_poll:
+        logger.info(
+            "Request started",
+            method=request.method,
+            url=str(request.url),
+            client_ip=request.client.host if request.client else None
+        )
     
-    # Process request
     response = await call_next(request)
     
-    # Log response
     process_time = time.time() - start_time
-    logger.info(
-        "Request completed",
-        method=request.method,
-        url=str(request.url),
-        status_code=response.status_code,
-        process_time=process_time
-    )
+    quiet = is_poll and response.status_code == 200
+    if not quiet:
+        logger.info(
+            "Request completed",
+            method=request.method,
+            url=str(request.url),
+            status_code=response.status_code,
+            process_time=process_time
+        )
     
     return response
 

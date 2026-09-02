@@ -79,8 +79,9 @@ const TestRuns: React.FC = () => {
     refetchInterval: (query) => {
       const data = query.state.data as TestRun[];
       const hasActive = data?.some((r: TestRun) => r.status === 'pending' || r.status === 'running');
-      return hasActive ? 2000 : false;
+      return hasActive ? 5000 : false;
     },
+    refetchIntervalInBackground: false,
   });
 
   // Fetch models for dropdown

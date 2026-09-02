@@ -29,6 +29,7 @@ import {
   Error as ErrorIcon,
   Info as InfoIcon,
   Warning as WarningIcon,
+  OpenInNew as OpenInNewIcon,
 } from '@mui/icons-material';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -40,7 +41,7 @@ const TestRunDetail: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [expandedLogs, setExpandedLogs] = useState(false);
+  const [expandedLogs, setExpandedLogs] = useState(true);
 
   // Fetch test run details - poll when pending/running for live status updates
   const { data: testRun, isLoading, error } = useQuery({
@@ -52,8 +53,9 @@ const TestRunDetail: React.FC = () => {
     enabled: !!id,
     refetchInterval: (query) => {
       const data = query.state.data as { status?: string };
-      return data?.status === 'pending' || data?.status === 'running' ? 2000 : false;
+      return data?.status === 'pending' || data?.status === 'running' ? 3000 : false;
     },
+    refetchIntervalInBackground: false,
   });
 
   // Start/Stop test run mutations
@@ -229,7 +231,18 @@ const TestRunDetail: React.FC = () => {
               startIcon={<DownloadIcon />}
               onClick={handleDownloadResults}
             >
-              Download Results
+              Download CSV
+            </Button>
+          )}
+          {testRun.grafana_url && (
+            <Button
+              variant="outlined"
+              startIcon={<OpenInNewIcon />}
+              href={testRun.grafana_url}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Open in Grafana
             </Button>
           )}
         </Box>
@@ -250,24 +263,38 @@ const TestRunDetail: React.FC = () => {
                   color={getStatusColor(testRun.status) as any}
                   size="medium"
                 />
-                {testRun.progress !== undefined && testRun.status === 'running' && (
+                {testRun.progress !== undefined && testRun.progress !== null && testRun.status === 'running' && (
                   <Typography variant="body2" color="text.secondary">
-                    {testRun.progress}% Complete
+                    {testRun.progress}% {testRun.results?.progress_message || 'Complete'}
                   </Typography>
                 )}
               </Box>
               
-              {testRun.status === 'running' && testRun.progress !== undefined && (
+              {testRun.status === 'running' && (
                 <LinearProgress 
-                  variant="determinate" 
-                  value={testRun.progress} 
+                  variant={testRun.progress ? 'determinate' : 'indeterminate'}
+                  value={testRun.progress || 0} 
                   sx={{ mb: 2 }}
                 />
               )}
 
-              {testRun.error_message && (
-                <Alert severity={testRun.status === 'completed_warning' ? 'warning' : 'error'} sx={{ mt: 2 }}>
+              {testRun.status === 'completed_warning' && (
+                <Alert severity="warning" sx={{ mt: 2 }}>
+                  Simulation and CSV finished, but InfluxDB export failed.
+                  {testRun.error_message ? ` ${testRun.error_message}` : ''}
+                </Alert>
+              )}
+              {testRun.error_message && testRun.status !== 'completed_warning' && (
+                <Alert severity="error" sx={{ mt: 2 }}>
                   {testRun.error_message}
+                </Alert>
+              )}
+              {(testRun.csv_exported !== undefined || testRun.influx_exported !== undefined) && (
+                <Alert
+                  severity={testRun.influx_exported === false ? 'warning' : 'info'}
+                  sx={{ mt: 2 }}
+                >
+                  CSV {testRun.csv_exported ? 'saved' : 'not saved'}. InfluxDB {testRun.influx_exported ? 'exported' : 'not exported'}.
                 </Alert>
               )}
             </CardContent>
@@ -437,23 +464,24 @@ const TestRunDetail: React.FC = () => {
         )}
 
         {/* Logs */}
-        {testRun.logs && testRun.logs.length > 0 && (
-          <Grid item xs={12}>
-            <Card>
-              <CardContent>
-                <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
-                  <Typography variant="h6">
-                    Execution Logs
-                  </Typography>
-                  <Button
-                    startIcon={<DownloadIcon />}
-                    onClick={handleDownloadLogs}
-                    variant="outlined"
-                    size="small"
-                  >
-                    Download Logs
-                  </Button>
-                </Box>
+        <Grid item xs={12}>
+          <Card>
+            <CardContent>
+              <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+                <Typography variant="h6">
+                  Execution Logs
+                </Typography>
+                <Button
+                  startIcon={<DownloadIcon />}
+                  onClick={handleDownloadLogs}
+                  variant="outlined"
+                  size="small"
+                  disabled={!testRun.logs || testRun.logs.length === 0}
+                >
+                  Download Logs
+                </Button>
+              </Box>
+              {testRun.logs && testRun.logs.length > 0 ? (
                 <Accordion 
                   expanded={expandedLogs} 
                   onChange={() => setExpandedLogs(!expandedLogs)}
@@ -471,10 +499,16 @@ const TestRunDetail: React.FC = () => {
                     </Paper>
                   </AccordionDetails>
                 </Accordion>
-              </CardContent>
-            </Card>
-          </Grid>
-        )}
+              ) : (
+                <Typography variant="body2" color="text.secondary">
+                  {testRun.status === 'running' || testRun.status === 'pending'
+                    ? 'Logs will appear here as the run progresses.'
+                    : 'No execution log was captured for this run.'}
+                </Typography>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
 
         {/* Output Files */}
         {testRun.output_files && testRun.output_files.length > 0 && (

@@ -4,12 +4,10 @@ Celery tasks for MATLAB model execution
 
 import json
 import os
-import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 from celery import current_task
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 from datetime import datetime, timezone
 import time
 import asyncio
@@ -20,9 +18,14 @@ from app.core.config import settings
 from app.core.database import AsyncSessionLocal, SessionLocal
 from app.models.test_run import TestRun
 from app.models.model import Model
+from app.models.user import User  # noqa: F401 — TestRun.user relationship
+from app.models.data_point import DataPoint  # noqa: F401
 from app.services.matlab_service import MATLABService
 from app.services.simulation_runner_service import SimulationRunnerService
 from app.services.influxdb_service import get_simulation_ids_in_time_range
+from app.services.run_logs import ensure_matlab_output_logged
+from app.services.run_state import parse_progress_line, update_run_results, progress_from_run, results_dict
+from app.services import simulation_ids
 
 logger = structlog.get_logger()
 
@@ -59,21 +62,8 @@ def _error_from_result(result: Dict[str, Any]) -> str:
 
 
 def _extract_simulation_id_from_output_dir(output_directory: Optional[str]) -> Optional[str]:
-    """Extract simulation_id (YYYYMMDD_HHMMSS) from first simOut_*.csv in output_directory.
-    This ID is used in InfluxDB/Grafana to filter time-series data in the 'simulations' bucket.
-    """
-    if not output_directory or not os.path.isdir(output_directory):
-        return None
-    try:
-        # Pattern: simOut_20260227_082647.csv or simOut_sweep_20260227_082647.csv
-        pattern = re.compile(r"simOut_(?:sweep_)?(\d{8}_\d{6})\.csv", re.IGNORECASE)
-        for name in sorted(os.listdir(output_directory)):
-            m = pattern.match(name)
-            if m:
-                return m.group(1)
-    except OSError:
-        pass
-    return None
+    """Latest simOut_YYYYMMDD_HHMMSS.csv — used as Grafana/Influx simulation_id."""
+    return simulation_ids.from_output_dir(output_directory)
 
 
 @celery_app.task(bind=True, name="execute_model")
@@ -189,14 +179,14 @@ def execute_model_task(
     return asyncio.run(_execute_model())
 
 
-def run_test_run_execution(test_run_id: int) -> None:
-    """
-    Execute a test run - used by FastAPI BackgroundTasks.
-    Uses SimulationRunnerService (subprocess/run_simulation.py) for directory models
-    when MATLAB Engine is not available. Falls back to MATLAB Engine for file models.
+@celery_app.task(bind=True, name="execute_test_run", time_limit=3600, soft_time_limit=3500)
+def execute_test_run_task(self, test_run_id: int):
+    """Celery wrapper so MATLAB runs in a worker process, not in uvicorn."""
+    run_test_run_execution(test_run_id)
 
-    This is a sync function for background task compatibility.
-    """
+
+def run_test_run_execution(test_run_id: int) -> None:
+    """Run a test run in a worker process (Celery or `python -m app.worker`)."""
     print(f"\n{'='*60}\n[TEST RUN] Starting execution for test_run_id={test_run_id}\n{'='*60}", flush=True)
     db = SessionLocal()
     try:
@@ -214,16 +204,22 @@ def run_test_run_execution(test_run_id: int) -> None:
             db.commit()
             return
 
-        # Directory model: use SimulationRunnerService (run_simulation.py) - no MATLAB Engine needed
         if model.model_type == "directory" and model.model_directory:
             sim_runner = SimulationRunnerService()
             if not sim_runner.is_available():
-                print(f"[TEST RUN] Simulation Runner not available - cannot execute directory model", flush=True)
-            elif sim_runner.is_available():
+                print("[TEST RUN] Simulation Runner not available - cannot execute directory model", flush=True)
+            else:
                 # Set running so UI shows correct status during execution (create flow doesn't set it)
                 test_run.status = "running"
                 if not test_run.start_time:
                     test_run.start_time = datetime.now(timezone.utc)
+                update_run_results(
+                    test_run,
+                    worker_pid=os.getpid(),
+                    heartbeat_at=datetime.now(timezone.utc).isoformat(),
+                    progress=1,
+                    progress_message="Queued worker started",
+                )
                 db.commit()
                 print(f"[TEST RUN] Executing directory model via Simulation Runner: {model.model_directory}", flush=True)
                 logger.info(
@@ -264,6 +260,28 @@ def run_test_run_execution(test_run_id: int) -> None:
                 if not db_mode:
                     logger.warning("INFLUXDB_TOKEN not set; skipping InfluxDB export", test_run_id=test_run_id)
 
+                last_progress_commit = [0.0]
+
+                def on_progress_line(line: str) -> None:
+                    parsed = parse_progress_line(line)
+                    now = time.time()
+                    if not parsed and now - last_progress_commit[0] < 15:
+                        return
+                    fields = parsed or {}
+                    if "progress" in fields:
+                        prev = results_dict(test_run).get("progress") or 0
+                        try:
+                            fields["progress"] = max(int(prev), int(fields["progress"]))
+                        except (TypeError, ValueError):
+                            fields.pop("progress", None)
+                    fields["heartbeat_at"] = datetime.now(timezone.utc).isoformat()
+                    update_run_results(test_run, **fields)
+                    try:
+                        db.commit()
+                    except Exception:
+                        db.rollback()
+                    last_progress_commit[0] = now
+
                 result = sim_runner.run_simulation(
                     project_directory=model.model_directory,
                     params_file=params_file,
@@ -277,6 +295,7 @@ def run_test_run_execution(test_run_id: int) -> None:
                     db_org=db_org,
                     db_bucket=db_bucket,
                     startup_script=model.startup_script,
+                    progress_callback=on_progress_line,
                 )
                 test_run.end_time = datetime.now(timezone.utc)
                 if test_run.start_time and test_run.end_time:
@@ -289,13 +308,29 @@ def run_test_run_execution(test_run_id: int) -> None:
                     except (TypeError, ValueError):
                         pass
                 output_dir = result.get("output_directory")
+                raw_output = result.get("output") or ""
+                try:
+                    ensure_matlab_output_logged(test_run_id, raw_output)
+                except Exception:
+                    logger.warning("Could not write MATLAB output to logs folder", test_run_id=test_run_id)
                 output_data = {
-                    "output": result.get("output", ""),
                     "output_directory": output_dir,
+                    "output_tail": raw_output[-4000:],
                 }
-                # Resolve simulation_id from InfluxDB only (mapping stored in Postgres test_runs.simulation_id)
-                simulation_id = None
-                if test_run.start_time or test_run.end_time:
+                db_warning = result.get("db_export_warning") if result.get("success") else None
+                csv_exported = bool(output_dir and _extract_simulation_id_from_output_dir(output_dir))
+                # Prefer the ID MATLAB actually wrote to Influx, not an older CSV in the same folder
+                simulation_id = simulation_ids.preferred_simulation_id(
+                    output_data=output_data,
+                    raw_output=raw_output,
+                )
+                if (
+                    not simulation_id
+                    and result.get("success")
+                    and not db_warning
+                    and db_mode
+                    and (test_run.start_time or test_run.end_time)
+                ):
                     start = test_run.start_time or test_run.end_time
                     end = test_run.end_time or test_run.start_time
                     if start:
@@ -322,6 +357,16 @@ def run_test_run_execution(test_run_id: int) -> None:
                             simulation_id = ids[0]
                 if simulation_id:
                     test_run.simulation_id = simulation_id
+
+                influx_ok = bool(result.get("success") and db_mode and not db_warning)
+                update_run_results(
+                    test_run,
+                    csv_exported=csv_exported or bool(output_dir),
+                    influx_exported=influx_ok,
+                    progress=100 if result.get("success") else progress_from_run(test_run),
+                    progress_message="Complete" if result.get("success") else "Failed",
+                    heartbeat_at=datetime.now(timezone.utc).isoformat(),
+                )
 
                 if result.get("success"):
                     db_warning = result.get("db_export_warning")
@@ -378,15 +423,13 @@ def run_test_run_execution(test_run_id: int) -> None:
                     return
                 return
 
-        # File model or directory model without Simulation Runner: require MATLAB Engine
-        # Note: execute_model_task uses AsyncSession which conflicts with BackgroundTasks
-        # thread (event loop). So we fail with clear message instead.
+        # File model or directory model without Simulation Runner
         error_msg = (
             "MATLAB Engine is not available for in-process execution. "
             "For directory models, ensure simulationsmodelle is a sibling directory. "
             "For file models, install: pip install matlabengine (from MATLAB)."
         )
-        logger.warning("Cannot execute file model from background task", test_run_id=test_run_id)
+        logger.warning("Cannot execute file model without MATLAB Engine", test_run_id=test_run_id)
         test_run.status = "failed"
         test_run.end_time = datetime.now(timezone.utc)
         test_run.error_message = error_msg
@@ -456,8 +499,6 @@ def validate_model_task(model_id: int, model_path: str):
                     "error": str(e)
                 }
     
-    # Run the async function
-    import asyncio
     return asyncio.run(_validate_model())
 
 

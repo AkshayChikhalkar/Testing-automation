@@ -2,7 +2,7 @@
 Pydantic schemas for TestRun
 """
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
@@ -54,6 +54,11 @@ class TestRunResponse(TestRunBase):
     results: Optional[Dict[str, Any]] = None
     report_path: Optional[str] = None
     model_name: Optional[str] = None
+    progress: Optional[int] = None
+    grafana_url: Optional[str] = None
+    csv_exported: Optional[bool] = None
+    influx_exported: Optional[bool] = None
+    logs: Optional[List[str]] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
     
@@ -74,6 +79,7 @@ class TestRunListResponse(BaseModel):
     end_time: Optional[datetime] = None
     error_message: Optional[str] = None
     created_at: datetime
+    progress: Optional[int] = None
     
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 
@@ -85,7 +91,8 @@ class TestRunStatus(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     execution_time: Optional[float] = None
-    progress: str = "0%"
+    progress: Optional[int] = None
+    progress_message: Optional[str] = None
     
     model_config = ConfigDict(from_attributes=True, protected_namespaces=())
 

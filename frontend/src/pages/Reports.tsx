@@ -1,12 +1,37 @@
 import React from 'react';
-import { Box } from '@mui/material';
+import { Box, CircularProgress, Typography } from '@mui/material';
+import { useQuery } from '@tanstack/react-query';
+import { apiService } from '../services/api';
 
 const Reports: React.FC = () => {
-  // Embed Grafana dashboard only, in light mode, with full Grafana controls (simulation_id, signals, etc.)
-  const grafanaUrl =
-    'http://193.16.126.186:3005/d/simulation-dashboard/simulation-data-dashboard' +
-    '?orgId=1&var-bucket=simulations&var-measurement=simulation_data&from=now-3h&to=now' +
-    '&theme=light';
+  const { data, isLoading, error } = useQuery({
+    queryKey: ['grafanaEmbed'],
+    queryFn: async () => {
+      const response = await apiService.reports.getGrafanaEmbed();
+      return response.data as { url?: string; simulation_id?: string };
+    },
+    refetchInterval: 60_000,
+  });
+
+  const grafanaUrl = data?.url;
+
+  if (isLoading) {
+    return (
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <CircularProgress />
+      </Box>
+    );
+  }
+
+  if (error || !grafanaUrl) {
+    return (
+      <Box sx={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', p: 3 }}>
+        <Typography color="text.secondary">
+          Analytics dashboard is unavailable. Complete a test run with InfluxDB export, then refresh.
+        </Typography>
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -28,4 +53,3 @@ const Reports: React.FC = () => {
 };
 
 export default Reports;
-

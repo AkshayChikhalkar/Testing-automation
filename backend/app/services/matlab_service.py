@@ -1,26 +1,34 @@
 """
-MATLAB Engine service for model execution
+MATLAB Engine service for model execution.
+
+The Engine is optional: directory models run via run_simulation.py. Importing
+this module must not load matlab.engine (that warning fires on every API start).
 """
 
 import os
-import sys
-import json
-import asyncio
-from typing import Dict, Any, Optional, List
-import structlog
-from pathlib import Path
+from typing import Any, Dict, Optional
 
-try:
-    import matlab.engine
-    MATLAB_AVAILABLE = True
-except ImportError:
-    MATLAB_AVAILABLE = False
-    matlab = None
+import structlog
 
 from app.core.config import settings
 from app.core.exceptions import MATLABException
 
 logger = structlog.get_logger()
+
+matlab = None  # set on first successful engine import
+
+
+def matlab_engine_available() -> bool:
+    global matlab
+    if matlab is not None:
+        return True
+    try:
+        import matlab.engine as engine_mod  # type: ignore
+
+        matlab = engine_mod
+        return True
+    except ImportError:
+        return False
 
 
 class MATLABService:
@@ -33,12 +41,12 @@ class MATLABService:
         
     async def initialize(self) -> bool:
         """Initialize MATLAB Engine"""
-        if not MATLAB_AVAILABLE:
+        if not matlab_engine_available():
             raise MATLABException("MATLAB Engine for Python is not installed")
         
         try:
             # Start MATLAB engine
-            self.engine = matlab.engine.start_matlab()
+            self.engine = matlab.start_matlab()
             
             # Add MATLAB path if specified
             if self.matlab_path and os.path.exists(self.matlab_path):
@@ -176,12 +184,14 @@ class MATLABService:
     ) -> Dict[str, Any]:
         """Execute MATLAB M-file"""
         try:
+            import matlab as matlab_types  # type: ignore
+
             # Set input variables in MATLAB workspace
             for var_name, var_value in input_data.items():
                 if isinstance(var_value, (int, float)):
-                    self.engine.workspace[var_name] = matlab.double([var_value])
+                    self.engine.workspace[var_name] = matlab_types.double([var_value])
                 elif isinstance(var_value, list):
-                    self.engine.workspace[var_name] = matlab.double(var_value)
+                    self.engine.workspace[var_name] = matlab_types.double(var_value)
                 elif isinstance(var_value, str):
                     self.engine.workspace[var_name] = var_value
             

@@ -4,8 +4,7 @@ Application configuration settings
 
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-from pydantic import field_validator, computed_field
-import os
+from pydantic import computed_field
 
 
 class Settings(BaseSettings):
@@ -51,6 +50,11 @@ class Settings(BaseSettings):
     INFLUXDB_PORT: Optional[int] = None
     INFLUXDB_ORG: str = "my-org"
     INFLUXDB_BUCKET: str = "simulations"
+    GRAFANA_DASHBOARD_URL: str = (
+        "http://193.16.126.186:3005/d/simulation-dashboard/simulation-data-dashboard"
+        "?orgId=1&var-bucket=simulations&var-measurement=simulation_data&from=now-7d&to=now"
+    )
+    SIMULATION_TIMEOUT_SECONDS: int = 3600
     
     # Simulationsmodelle project path (for MATLAB CLI execution)
     # Path to the simulationsmodelle repo containing run_simulation.py
@@ -71,7 +75,6 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:3000,http://localhost:8080"
     CORS_CREDENTIALS: bool = True
     ALLOWED_HOSTS: str = "*"
-    ALLOWED_EXTENSIONS: str = ".m,.slx,.mat,.csv,.xlsx,.json"
     
     @computed_field
     @property
@@ -92,7 +95,7 @@ class Settings(BaseSettings):
         """Host/org/bucket/token for InfluxDB. Token comes only from settings/.env."""
         from urllib.parse import urlparse
         parsed = urlparse(self.INFLUXDB_URL or "")
-        host = self.INFLUXDB_HOST or parsed.hostname or "193.16.126.186"
+        host = self.INFLUXDB_HOST or parsed.hostname or "localhost"
         port = self.INFLUXDB_PORT or parsed.port or 8086
         return {
             "token": self.INFLUXDB_TOKEN,

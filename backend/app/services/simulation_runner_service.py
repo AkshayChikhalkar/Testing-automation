@@ -12,7 +12,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Callable
 import structlog
 
 from app.core.config import settings
@@ -128,6 +128,7 @@ class SimulationRunnerService:
         db_org: Optional[str] = None,
         db_bucket: Optional[str] = None,
         startup_script: Optional[str] = None,
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """
         Run MATLAB simulation via run_simulation.py.
@@ -172,8 +173,13 @@ class SimulationRunnerService:
 
         cfg = load_run_config(project_dir)
         project_root = find_project_root(project_dir)
+        # run_config.json wins so the registered model cannot launch the wrong entrypoint
         startup_rel = cfg.get("startup_script") or "MODEL_SingleStab_ECU/startup_MDL.m"
-        if startup_script:
+        if cfg.get("startup_script"):
+            startup_path = project_root / startup_rel
+            if not startup_path.exists():
+                startup_path = project_dir / startup_rel
+        elif startup_script:
             startup_path = Path(startup_script)
         else:
             startup_path = project_root / startup_rel
@@ -230,7 +236,8 @@ class SimulationRunnerService:
         # Output dir where run_simulation.py writes .mat and .json files
         output_dir = startup_path.parent / "output"
         return self._execute(
-            cmd, cwd, output_dir, db_mode, db_type, db_host, db_port, db_token, db_org, db_bucket
+            cmd, cwd, output_dir, db_mode, db_type, db_host, db_port, db_token, db_org, db_bucket,
+            progress_callback=progress_callback,
         )
 
     def _execute(
@@ -245,6 +252,7 @@ class SimulationRunnerService:
         db_token: Optional[str],
         db_org: Optional[str],
         db_bucket: Optional[str],
+        progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Dict[str, Any]:
         """Execute run_simulation.py subprocess"""
         influx = settings.influx_connection()
@@ -296,6 +304,11 @@ class SimulationRunnerService:
                     for line in iter(stream.readline, ""):
                         with output_lock:
                             dest.append(line)
+                        if progress_callback:
+                            try:
+                                progress_callback(line)
+                            except Exception:
+                                pass
                         if out_sys:
                             try:
                                 out_sys.write(line)
@@ -322,13 +335,14 @@ class SimulationRunnerService:
                 bufsize=1,
                 env=env,
             )
+            timeout_s = int(settings.SIMULATION_TIMEOUT_SECONDS or 3600)
             reader = threading.Thread(
                 target=read_stream,
                 args=(process.stdout, output_lines, sys.stdout),
                 daemon=True,
             )
             reader.start()
-            return_code = process.wait(timeout=3600)
+            return_code = process.wait(timeout=timeout_s)
             reader.join(timeout=2)
             captured_output = "".join(output_lines)
 
@@ -351,7 +365,7 @@ class SimulationRunnerService:
                     pass
             return {
                 "success": False,
-                "error": "Simulation timed out after 1 hour",
+                "error": f"Simulation timed out after {int(settings.SIMULATION_TIMEOUT_SECONDS or 3600)} seconds",
                 "output": "",
                 "return_code": -1,
                 "output_directory": str(output_dir),

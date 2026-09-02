@@ -107,11 +107,7 @@ export const apiService = {
 
   // Reports endpoints
   reports: {
-    getAnalytics: (params?: any) => apiClient.get('/reports/analytics', { params }),
-    getTestTrends: (params?: any) => apiClient.get('/reports/trends', { params }),
-    getModelPerformance: (params?: any) => apiClient.get('/reports/model-performance', { params }),
-    exportPDF: (params?: any) => apiClient.get('/reports/export/pdf', { params, responseType: 'blob' }),
-    exportExcel: (params?: any) => apiClient.get('/reports/export/excel', { params, responseType: 'blob' }),
+    getGrafanaEmbed: () => apiClient.get('/reports/grafana'),
   },
 
   // Dashboard data

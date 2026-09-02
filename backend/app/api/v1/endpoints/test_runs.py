@@ -7,8 +7,8 @@ import io
 import json
 import zipfile
 from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import FileResponse, StreamingResponse, Response
 import os
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
@@ -21,10 +21,11 @@ from app.core.config import settings
 from app.models.test_run import TestRun
 from app.models.model import Model
 from app.models.data_point import DataPoint
-from app.services.matlab_service import MATLABService
 from app.schemas.test_run import TestRunCreate, TestRunResponse, TestRunListResponse
-from app.tasks.matlab_tasks import execute_model_task, run_test_run_execution
-from app.services.influxdb_service import get_simulation_ids_in_time_range
+from app.services.job_dispatcher import enqueue_test_run, kill_worker, grafana_url_for
+from app.services.run_logs import read_log_lines, read_log_text, resolve_log_path
+from app.services.run_state import progress_from_run, results_dict
+from app.services.simulation_ids import from_test_run as simulation_id_for
 
 router = APIRouter()
 logger = structlog.get_logger()
@@ -78,7 +79,7 @@ async def list_test_runs(
                 "name": test_run.name,
                 "model_id": test_run.model_id,
                 "model_name": test_run.model.name if test_run.model else None,
-                "simulation_id": test_run.simulation_id,
+                "simulation_id": simulation_id_for(test_run) or test_run.simulation_id,
                 "user_id": test_run.user_id,
                 "status": test_run.status,
                 "execution_time": exec_time,
@@ -86,6 +87,7 @@ async def list_test_runs(
                 "end_time": test_run.end_time,
                 "error_message": test_run.error_message,
                 "created_at": test_run.created_at,
+                "progress": progress_from_run(test_run),
             }
             response_data.append(test_run_dict)
         
@@ -113,7 +115,13 @@ async def get_test_run(test_run_id: int, db: AsyncSession = Depends(get_async_db
         if test_run.model:
             resp.model_name = test_run.model.name
         # simulation_id is stored directly on the TestRun row (Postgres mapping)
-        resp.simulation_id = test_run.simulation_id
+        resp.simulation_id = simulation_id_for(test_run) or test_run.simulation_id
+        resp.progress = progress_from_run(test_run)
+        extra = results_dict(test_run)
+        resp.csv_exported = extra.get("csv_exported")
+        resp.influx_exported = extra.get("influx_exported")
+        resp.grafana_url = grafana_url_for(resp.simulation_id)
+        resp.logs = read_log_lines(test_run.id, test_run.output_data)
         return resp
     except HTTPException:
         raise
@@ -125,7 +133,6 @@ async def get_test_run(test_run_id: int, db: AsyncSession = Depends(get_async_db
 @router.post("/", response_model=TestRunResponse)
 async def create_test_run(
     test_run_data: TestRunCreate,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_async_db),
     current_user = Depends(get_current_user)
 ):
@@ -153,8 +160,7 @@ async def create_test_run(
         await db.commit()
         await db.refresh(test_run)
         
-        # Start execution in background (uses Simulation Runner for directory models)
-        background_tasks.add_task(run_test_run_execution, test_run.id)
+        enqueue_test_run(test_run.id)
 
         logger.info("Test run created", test_run_id=test_run.id, model_id=model.id)
         return test_run
@@ -167,7 +173,6 @@ async def create_test_run(
 
 @router.post("/create-with-input", response_model=TestRunResponse)
 async def create_test_run_with_input(
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     model_id: int = Form(...),
     input_file: UploadFile = File(...),
@@ -201,7 +206,6 @@ async def create_test_run_with_input(
         parsed_config = None
         if configuration:
             try:
-                import json
                 val = json.loads(configuration)
                 if isinstance(val, dict):
                     parsed_config = val
@@ -222,9 +226,7 @@ async def create_test_run_with_input(
         await db.commit()
         await db.refresh(test_run)
 
-        # Start background execution if requested
-        if background_tasks is not None:
-            background_tasks.add_task(run_test_run_execution, test_run.id)
+        enqueue_test_run(test_run.id)
 
         logger.info("Test run created with input file", test_run_id=test_run.id, model_id=model.id)
         return test_run
@@ -238,7 +240,6 @@ async def create_test_run_with_input(
 @router.post("/{test_run_id}/execute")
 async def execute_test_run(
     test_run_id: int,
-    background_tasks: BackgroundTasks,
     db: AsyncSession = Depends(get_async_db)
 ):
     """Execute an existing test run"""
@@ -259,13 +260,12 @@ async def execute_test_run(
         if not model:
             raise HTTPException(status_code=404, detail="Model not found")
         
-        # Update status to running
-        test_run.status = "running"
+        test_run.status = "pending"
         test_run.start_time = datetime.now(timezone.utc)
+        test_run.error_message = None
         await db.commit()
         
-        # Start execution in background (uses Simulation Runner for directory models)
-        background_tasks.add_task(run_test_run_execution, test_run.id)
+        enqueue_test_run(test_run.id)
 
         logger.info("Test run execution started", test_run_id=test_run.id)
         return {"message": "Test run execution started", "test_run_id": test_run.id}
@@ -319,7 +319,7 @@ async def cancel_test_run(test_run_id: int, db: AsyncSession = Depends(get_async
         if test_run.status not in ["pending", "running"]:
             raise HTTPException(status_code=400, detail="Test run cannot be cancelled in current status")
         
-        # Update status to cancelled
+        kill_worker(results_dict(test_run).get("worker_pid"))
         test_run.status = "cancelled"
         test_run.end_time = datetime.now(timezone.utc)
         await db.commit()
@@ -371,13 +371,37 @@ async def generate_test_report(test_run_id: int, db: AsyncSession = Depends(get_
         if test_run.status not in ("completed", "completed_warning"):
             raise HTTPException(status_code=400, detail="Test report can only be generated for completed test runs")
         
-        # TODO: Implement report generation
-        # This would typically generate a PDF or HTML report
+        extra = results_dict(test_run)
+        reports_dir = os.path.join(settings.UPLOAD_PATH, "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        report_path = os.path.join(reports_dir, f"test_run_{test_run.id}.html")
+        grafana = grafana_url_for(simulation_id_for(test_run) or test_run.simulation_id) or ""
+        csv_ok = extra.get("csv_exported")
+        influx_ok = extra.get("influx_exported")
+        sim_id = simulation_id_for(test_run) or test_run.simulation_id or "n/a"
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Test run {test_run.id}</title></head>
+<body>
+<h1>{test_run.name}</h1>
+<p>Status: {test_run.status}</p>
+<p>Simulation ID: {sim_id}</p>
+<p>CSV exported: {csv_ok}</p>
+<p>InfluxDB exported: {influx_ok}</p>
+<p>Duration (s): {test_run.execution_time or "n/a"}</p>
+{"<p><a href='" + grafana + "'>Open in Grafana</a></p>" if grafana else ""}
+{"<p><strong>Warning:</strong> " + (test_run.error_message or "") + "</p>" if test_run.status == "completed_warning" else ""}
+</body></html>
+"""
+        with open(report_path, "w", encoding="utf-8") as f:
+            f.write(html)
+        test_run.report_path = report_path.replace("\\", "/")
+        await db.commit()
         
         return {
-            "message": "Test report generation started",
+            "message": "Test report generated",
             "test_run_id": test_run_id,
-            "report_path": test_run.report_path
+            "report_path": test_run.report_path,
+            "grafana_url": grafana or None,
         }
     except HTTPException:
         raise
@@ -396,13 +420,16 @@ async def get_test_run_status(test_run_id: int, db: AsyncSession = Depends(get_a
         if not test_run:
             raise HTTPException(status_code=404, detail="Test run not found")
         
+        extra = results_dict(test_run)
+        pct = progress_from_run(test_run)
         return {
             "test_run_id": test_run.id,
             "status": test_run.status,
             "start_time": test_run.start_time,
             "end_time": test_run.end_time,
             "execution_time": test_run.execution_time,
-            "progress": "0%"  # TODO: Implement progress tracking
+            "progress": pct,
+            "progress_message": extra.get("progress_message"),
         }
     except HTTPException:
         raise
@@ -480,6 +507,40 @@ def _build_recorded_data_csv(
     return out.getvalue()
 
 
+@router.get("/{test_run_id}/logs/download")
+async def download_test_run_logs(
+    test_run_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user=Depends(get_current_user),
+):
+    """Download the execution log for a test run."""
+    result = await db.execute(select(TestRun).where(TestRun.id == test_run_id))
+    test_run = result.scalar_one_or_none()
+    if not test_run:
+        raise HTTPException(status_code=404, detail="Test run not found")
+    if not (current_user.is_superuser or test_run.user_id == current_user.id):
+        raise HTTPException(status_code=403, detail="Not authorized to download this test run")
+
+    log_file = resolve_log_path(test_run_id)
+    if log_file:
+        return FileResponse(
+            path=str(log_file),
+            media_type="text/plain; charset=utf-8",
+            filename=f"test-run-{test_run_id}-logs.txt",
+        )
+
+    text = read_log_text(test_run_id)
+    if not text and isinstance(test_run.output_data, dict):
+        text = test_run.output_data.get("output_tail") or test_run.output_data.get("output") or ""
+    if not text:
+        raise HTTPException(status_code=404, detail="No logs found for this test run")
+    return Response(
+        content=text,
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="test-run-{test_run_id}-logs.txt"'},
+    )
+
+
 @router.get("/{test_run_id}/download", response_class=StreamingResponse)
 async def download_test_run_results(
     test_run_id: int,
@@ -517,7 +578,7 @@ async def download_test_run_results(
                 "end_time": str(test_run.end_time) if test_run.end_time else None,
                 "execution_time": test_run.execution_time,
                 "error_message": test_run.error_message,
-                "simulation_id": test_run.simulation_id,
+                "simulation_id": simulation_id_for(test_run) or test_run.simulation_id,
             }
             zf.writestr("metadata.json", json.dumps(meta, indent=2))
 
@@ -527,13 +588,16 @@ async def download_test_run_results(
 
             # Full output_data from DB; include simulation_id from Postgres when set
             output_data = dict(test_run.output_data or {})
-            if test_run.simulation_id:
-                output_data["simulation_id"] = test_run.simulation_id
+            preferred_sid = simulation_id_for(test_run) or test_run.simulation_id
+            if preferred_sid:
+                output_data["simulation_id"] = preferred_sid
             if output_data:
                 zf.writestr("output_data.json", json.dumps(output_data, indent=2, default=str))
 
             # Console output (MATLAB/simulation logs)
-            console_output = output_data.get("output", "") if isinstance(output_data, dict) else ""
+            console_output = read_log_text(test_run_id)
+            if not console_output and isinstance(output_data, dict):
+                console_output = output_data.get("output_tail") or output_data.get("output") or ""
             if console_output:
                 zf.writestr("console_output.txt", console_output, zipfile.ZIP_DEFLATED)
 
